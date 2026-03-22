@@ -273,13 +273,8 @@ local function QueueLinesForReading()
     ns.SpeakCurrentLine()
 end
 
--- Read function: accepts a string or a table of strings and starts queued TTS for them
-local function Read(items)
-    -- if ns.is_speaking then
-    --     TTSLog("Read suppressed: already speaking")
-    --     return false
-    -- end
-
+-- Handle input for reading
+local function HandleInput(items)
     if type(items) == "string" then
         HandleStringInput(items)
     elseif type(items) == "table" then
@@ -287,16 +282,29 @@ local function Read(items)
     else
         return false
     end
+    return true
+end
 
+-- Validate input for reading
+local function ValidateInput()
     if not tts_lines or #tts_lines == 0 then
         TTSLog("Read: no parts to speak")
         return false
     end
+    return true
+end
 
+-- Read function: accepts a string or a table of strings and starts queued TTS for them
+local function Read(items)
+    if not HandleInput(items) then
+        return false
+    end
+    if not ValidateInput() then
+        return false
+    end
     if ProcessSecretValues() then
         return true
     end
-
     QueueLinesForReading()
     return true
 end
@@ -319,8 +327,19 @@ local function FormatAuctionOwnInfo(item)
         ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', ' .. SecondsToTime(item.timeLeft) .. ' remaining'
 end
 
--- Add default parts for reading
-local function AddDefaultParts(parts)
+-- Gather auction parts for reading
+local function GatherAuctionParts(parts)
+    if ns.LAST_HOVERED_AH_ITEM_BUY then
+        table.insert(parts, FormatAuctionBuyInfo(ns.LAST_HOVERED_AH_ITEM_BUY))
+    elseif ns.LAST_HOVERED_AH_ITEM_SELL then
+        table.insert(parts, FormatAuctionSellInfo(ns.LAST_HOVERED_AH_ITEM_SELL))
+    elseif ns.LAST_HOVERED_AH_ITEM_OWN then
+        table.insert(parts, FormatAuctionOwnInfo(ns.LAST_HOVERED_AH_ITEM_OWN))
+    end
+end
+
+-- Gather default parts for reading
+local function GatherDefaultParts(parts)
     local priceText = ns.GetMerchantPriceText()
     local questTextParts = ns.GetQuestText()
     local hoverText = ns.GetTextUnderMouse()
@@ -339,30 +358,27 @@ end
 -- Gather parts for reading based on context
 local function GatherPartsForReading()
     local parts = {}
-
-    if ns.LAST_HOVERED_AH_ITEM_BUY then
-        table.insert(parts, FormatAuctionBuyInfo(ns.LAST_HOVERED_AH_ITEM_BUY))
-    elseif ns.LAST_HOVERED_AH_ITEM_SELL then
-        table.insert(parts, FormatAuctionSellInfo(ns.LAST_HOVERED_AH_ITEM_SELL))
-    elseif ns.LAST_HOVERED_AH_ITEM_OWN then
-        table.insert(parts, FormatAuctionOwnInfo(ns.LAST_HOVERED_AH_ITEM_OWN))
-    else
-        AddDefaultParts(parts)
+    GatherAuctionParts(parts)
+    if #parts == 0 then
+        GatherDefaultParts(parts)
     end
-
     return parts
+end
+
+-- Process gathered parts for reading
+local function ProcessPartsForReading(parts)
+    if #parts > 0 then
+        Read(parts)
+    else
+        TTSLog("OnEvent CTRL: nothing to read")
+    end
 end
 
 -- Handle CTRL key press event
 local function HandleCtrlKeyPress()
     TTSLog("OnEvent START (CTRL)")
     local parts = GatherPartsForReading()
-
-    if #parts > 0 then
-        Read(parts)
-    else
-        TTSLog("OnEvent CTRL: nothing to read")
-    end
+    ProcessPartsForReading(parts)
 end
 
 -- Handle LSHIFT key press event
