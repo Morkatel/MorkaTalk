@@ -57,39 +57,20 @@ local function ValidateQueue()
     return true
 end
 
+
+
 -- Process the current line (extract text, read aloud)
 local function ProcessCurrentLine()
-    local text = table.remove(tts_lines, 1)
-    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
-    local text_len = issecretvalue(text) and 1 or #text
-    if not text or text_len == 0 then
-        tts_idx = tts_idx + 1
-        C_Timer.After(0.01, ns.SpeakCurrentLine)
-        return
-    end
-
-    ns.is_speaking = true
-    ns.ReadText(text)
+    local text, text_len, tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
+    if not text then return nil, 0 end
+    ns.ReadTextAloud(text, ns)
     return text, text_len
 end
 
 -- Schedule the next line based on estimated time
 local function ScheduleNextLine(text, text_len)
-    if C_Timer and text_len and text_len > 0 then
-        if issecretvalue(text) == false then
-            local est = ns.EstimateSpeechDuration(text)
-            ns.SafeCancelTimer(tts_timer)
-            tts_timer = nil
-            tts_timer = C_Timer.NewTimer(est + 0.2, function()
-                tts_idx = tts_idx + 1
-                ns.SpeakCurrentLine()
-            end)
-        else
-            print("SECRET SKIPPED")
-        end
-    else
-        ns.is_speaking = false
-    end
+    local est = ns.CalculateSpeechDuration(text, ns)
+    tts_timer, tts_idx = ns.ScheduleNextTimer(est, tts_timer, tts_idx, ns)
 end
 
 -- Speak the current queued line (internal)

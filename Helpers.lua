@@ -79,6 +79,52 @@ local function TryGetTextFromFrame(f)
     return nil
 end
 
+-- Extract text from the current line
+local function ExtractTextFromLine(tts_lines, tts_idx)
+    local text = table.remove(tts_lines, 1)
+    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
+    local text_len = issecretvalue(text) and 1 or #text
+    if not text or text_len == 0 then
+        tts_idx = tts_idx + 1
+        C_Timer.After(0.01, ns.SpeakCurrentLine)
+        return nil, 0, tts_idx
+    end
+    return text, text_len, tts_idx
+end
+
+-- Read the extracted text aloud
+local function ReadTextAloud(text, ns)
+    ns.is_speaking = true
+    ns.ReadText(text)
+end
+
+-- Calculate the estimated speech duration
+local function CalculateSpeechDuration(text, ns)
+    if not text then return 1 end
+    if issecretvalue(text) == false then
+        return ns.EstimateSpeechDuration(text)
+    else
+        print("SECRET SKIPPED")
+        return 0
+    end
+end
+
+-- Schedule the next line based on estimated time
+local function ScheduleNextTimer(est, tts_timer, tts_idx, ns)
+    if not C_Timer then return tts_timer, tts_idx end
+    if not est or est <= 0 then
+        ns.is_speaking = false
+        return tts_timer, tts_idx
+    end
+    ns.SafeCancelTimer(tts_timer)
+    tts_timer = nil
+    tts_timer = C_Timer.NewTimer(est + 0.2, function()
+        tts_idx = tts_idx + 1
+        ns.SpeakCurrentLine()
+    end)
+    return tts_timer, tts_idx
+end
+
 -- Helper: attempt to extract readable text from children of a frame
 local function TryGetTextFromChildren(frame)
     if not frame then return nil end
@@ -163,6 +209,12 @@ ns.TTSLog = function(...)
     for i = 1, n do parts[i] = tostring(select(i, ...)) end
     print("MorkaUI TTS:", table.concat(parts, " "))
 end
+
+-- Expose helper functions for Core.lua
+ns.ExtractTextFromLine = ExtractTextFromLine
+ns.ReadTextAloud = ReadTextAloud
+ns.CalculateSpeechDuration = CalculateSpeechDuration
+ns.ScheduleNextTimer = ScheduleNextTimer
 
 ns.GetTTSSettings = function()
     local volume, rate, voiceID = 100, 0, 0
