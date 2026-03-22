@@ -59,17 +59,25 @@ end
 
 
 
--- Process the current line (extract text, read aloud)
-local function ProcessCurrentLine()
-    local text, text_len, tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
+-- Extract the current line text
+local function ExtractCurrentLineText()
+    local text, text_len, new_tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
     if not text then return nil, 0 end
+    return text, text_len, new_tts_idx
+end
+
+-- Read the extracted line aloud
+local function ReadCurrentLineAloud(text)
     ns.ReadTextAloud(text, ns)
-    return text, text_len
+end
+
+-- Calculate the duration for the current line
+local function CalculateLineDuration(text)
+    return ns.CalculateSpeechDuration(text, ns)
 end
 
 -- Schedule the next line based on estimated time
-local function ScheduleNextLine(text, text_len)
-    local est = ns.CalculateSpeechDuration(text, ns)
+local function ScheduleNextTimerForLine(est, text_len)
     tts_timer, tts_idx = ns.ScheduleNextTimer(est, tts_timer, tts_idx, ns)
 end
 
@@ -79,8 +87,11 @@ ns.SpeakCurrentLine = function()
         return
     end
 
-    local text, text_len = ProcessCurrentLine()
-    ScheduleNextLine(text, text_len)
+    local text, text_len, new_tts_idx = ExtractCurrentLineText()
+    if not text then return end
+    ReadCurrentLineAloud(text)
+    local est = CalculateLineDuration(text)
+    ScheduleNextTimerForLine(est, text_len)
 end
 
 -- Skip current line and move to next
@@ -309,99 +320,71 @@ local function Read(items)
     return true
 end
 
+-- Handle CTRL key press event
+local function HandleCtrlKeyPress()
+    TTSLog("OnEvent START (CTRL)")
+    local priceText = ns.GetMerchantPriceText()
+    local questTextParts = ns.GetQuestText()
+    local hoverText = ns.GetTextUnderMouse()
+    local tooltipParts = ReadAndSpeakGameTooltip()
+    local parts = {}
+
+    if ns.LAST_HOVERED_AH_ITEM_BUY then
+        local itemName = ns.LAST_HOVERED_AH_ITEM_BUY.itemName
+        local price = ns.LAST_HOVERED_AH_ITEM_BUY.price
+        local totalQuantity = ns.LAST_HOVERED_AH_ITEM_BUY.totalQuantity
+        table.insert(parts, itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. totalQuantity)
+    elseif ns.LAST_HOVERED_AH_ITEM_SELL then
+        local price = ns.LAST_HOVERED_AH_ITEM_SELL.price
+        local quantity = ns.LAST_HOVERED_AH_ITEM_SELL.totalQuantity
+        local sellers = ns.LAST_HOVERED_AH_ITEM_SELL.sellers
+        table.insert(parts, 'Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. quantity .. ' from ' .. sellers .. ' sellers')
+    elseif ns.LAST_HOVERED_AH_ITEM_OWN then
+        local itemName = ns.LAST_HOVERED_AH_ITEM_OWN.itemName
+        local price = ns.LAST_HOVERED_AH_ITEM_OWN.price
+        local timeLeft = ns.LAST_HOVERED_AH_ITEM_OWN.timeLeft
+        table.insert(parts, itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', ' .. SecondsToTime(timeLeft) .. ' remaining')
+    else
+        if priceText then table.insert(parts, priceText) end
+        if tooltipParts then
+            for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
+        elseif hoverText then
+            table.insert(parts, hoverText)
+        elseif ns.IsQuestAvailable() then
+            for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
+        end
+    end
+
+    if #parts > 0 then
+        Read(parts)
+    else
+        TTSLog("OnEvent CTRL: nothing to read")
+    end
+end
+
+-- Handle LSHIFT key press event
+local function HandleShiftKeyPress()
+    TTSLog("OnEvent STOP")
+    StopSpeaking()
+end
+
+-- Handle LALT key press event
+local function HandleAltKeyPress()
+    TTSLog("OnEvent SKIP")
+    SkipLine()
+end
+
 local tooltipKeyListener = CreateFrame("Frame", "BSTooltipKeyListener")
 tooltipKeyListener:RegisterEvent("MODIFIER_STATE_CHANGED")
 tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
     if not key then return end
     TTSLog(event .. " " .. key .. " " .. down)
-    if string.find(key, "CTRL") then
-        if down == 1 then
-            TTSLog("OnEvent START (CTRL)")
-
-            -- ns.OnInboxShown()
-
-            -- local f = EnumerateFrames()
-            -- while f do
-            --     if f:IsVisible() and f:IsMouseOver() then
-            --         print(f:GetDebugName())
-            --         DevTools_Dump(f)
-
-            --         if f.GetText then
-            --             Read(f.GetText())
-            --             return
-            --         end
-            --         if f.Text then
-            --             Read(f.Text:GetText())
-            --             return
-            --         end
-            --         break
-            --     end
-            --     f = EnumerateFrames(f)
-            -- end
-
-            -- Gather hover text and tooltip lines, then read them if anything gathered
-            -- local hoverText = ReadHoveredButton()
-            local priceText = ns.GetMerchantPriceText()
-            local questTextParts = ns.GetQuestText()
-            local hoverText = ns.GetTextUnderMouse()
-            local tooltipParts = ReadAndSpeakGameTooltip()
-            local parts = {}
-
-            if ns.LAST_HOVERED_AH_ITEM_BUY then
-                local itemName = ns.LAST_HOVERED_AH_ITEM_BUY.itemName
-                local price = ns.LAST_HOVERED_AH_ITEM_BUY.price
-                local totalQuantity = ns.LAST_HOVERED_AH_ITEM_BUY.totalQuantity
-
-                table.insert(parts,
-                    itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. totalQuantity)
-            elseif ns.LAST_HOVERED_AH_ITEM_SELL then
-                local price = ns.LAST_HOVERED_AH_ITEM_SELL.price
-                local quantity = ns.LAST_HOVERED_AH_ITEM_SELL.totalQuantity
-                local sellers = ns.LAST_HOVERED_AH_ITEM_SELL.sellers
-
-                table.insert(parts,
-                    'Price: ' ..
-                    ns.GetFormattedPrice(price) .. ', Quantity: ' .. quantity .. ' from ' .. sellers .. ' sellers')
-            elseif ns.LAST_HOVERED_AH_ITEM_OWN then
-                local itemName = ns.LAST_HOVERED_AH_ITEM_OWN.itemName
-                local price = ns.LAST_HOVERED_AH_ITEM_OWN.price
-                local timeLeft = ns.LAST_HOVERED_AH_ITEM_OWN.timeLeft
-
-                table.insert(parts,
-                    itemName ..
-                    ', Price: ' .. ns.GetFormattedPrice(price) .. ', ' .. SecondsToTime(timeLeft) .. ' remaining')
-            else
-                if priceText then
-                    table.insert(parts, priceText)
-                end
-
-                if tooltipParts then
-                    for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
-                elseif hoverText then
-                    table.insert(parts, hoverText)
-                elseif ns.IsQuestAvailable() then
-                    for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
-                end
-            end
-
-            if #parts > 0 then
-                Read(parts)
-            else
-                TTSLog("OnEvent CTRL: nothing to read")
-            end
-        end
-    end
-    if string.find(key, "LSHIFT") then
-        if down == 1 then
-            TTSLog("OnEvent STOP")
-            StopSpeaking()
-        end
-    end
-    if string.find(key, "LALT") then
-        if down == 1 then
-            TTSLog("OnEvent SKIP")
-            SkipLine()
-        end
+    if string.find(key, "CTRL") and down == 1 then
+        HandleCtrlKeyPress()
+    elseif string.find(key, "LSHIFT") and down == 1 then
+        HandleShiftKeyPress()
+    elseif string.find(key, "LALT") and down == 1 then
+        HandleAltKeyPress()
     end
 end)
 

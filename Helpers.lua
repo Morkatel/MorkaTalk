@@ -515,6 +515,30 @@ local function GetHoveredAHListing()
     end
 end
 
+-- Extract price from auction data
+local function ExtractAuctionPrice(rowData)
+    return rowData.minPrice or rowData.buyoutAmount or rowData.unitPrice or 0
+end
+
+-- Extract item name from auction data
+local function ExtractItemName(rowData)
+    local itemName = "Unknown Item"
+    local itemID = rowData.itemKey and rowData.itemKey.itemID or rowData.itemID
+
+    if itemID and _G.GetItemInfo then
+        local name = GetItemInfo(itemID)
+        if name then itemName = name end
+    end
+
+    return itemName
+end
+
+-- Format auction info for output
+local function FormatAuctionInfo(itemName, price)
+    local priceString = ns.GetFormattedPrice(price)
+    return string.format("%s. Price: %s", itemName, priceString)
+end
+
 ns.GetAuctionInfoUnderMouse = function()
     GetHoveredAHListing()
 
@@ -522,8 +546,7 @@ ns.GetAuctionInfoUnderMouse = function()
     local focus = select(1, GetMouseFoci())
     if not focus then return "" end
 
-    -- 1. Traverse up to find the row frame (which holds the data)
-    -- The mouse might be over a child element (like the icon or a texture), so we check parents.
+    -- Traverse up to find the row frame (which holds the data)
     local rowData = nil
     local current = focus
 
@@ -544,28 +567,10 @@ ns.GetAuctionInfoUnderMouse = function()
 
     if not rowData then return "" end
 
-    -- 2. Extract Price (Price fields differ between Commodities and Items)
-    local price = rowData.minPrice or rowData.buyoutAmount or rowData.unitPrice or 0
-
-    -- 3. Extract Item Name
-    local itemName = "Unknown Item"
-    local itemID = nil
-
-    if rowData.itemKey then
-        itemID = rowData.itemKey.itemID
-    elseif rowData.itemID then
-        itemID = rowData.itemID
-    end
-
-    if itemID and _G.GetItemInfo then
-        -- GetItemInfo is instant if data is cached (which it usually is for AH)
-        local name = GetItemInfo(itemID)
-        if name then itemName = name end
-    end
-
-    -- 4. Format Output
-    local priceString = ns.GetFormattedPrice(price)
-    return string.format("%s. Price: %s", itemName, priceString)
+    -- Extract and format auction info
+    local price = ExtractAuctionPrice(rowData)
+    local itemName = ExtractItemName(rowData)
+    return FormatAuctionInfo(itemName, price)
 end
 
 -- Helper for Price Formatting
