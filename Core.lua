@@ -148,19 +148,13 @@ local function GatherTooltipLines()
     return parts
 end
 
--- Process gathered tooltip lines
-local function ProcessTooltipLines(parts)
-    if #parts == 0 then return nil end
-
-    TTSLog("Tooltip gather lines:", #parts)
-    return parts
-end
-
 -- Read all visible GameTooltip lines and return them as a table of strings (gather-only)
 local function ReadAndSpeakGameTooltip()
     local parts = GatherTooltipLines()
-    if not parts then return nil end
-    return ProcessTooltipLines(parts)
+    if not parts or #parts == 0 then return nil end
+
+    TTSLog("Tooltip gather lines:", #parts)
+    return parts
 end
 
 -- Trigger tooltip read when Ctrl key is pressed; stop reading when released
@@ -263,36 +257,11 @@ local function ExtractHoveredFrame()
     return focus
 end
 
--- Extract text from the hovered frame
-local function ExtractTextFromHoveredFrame(frame)
-    if not frame then return nil end
-    local frameName = frame:GetName() or "unnamed"
-    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
-
-    local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
-    local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
-
-    if not text or text == "" then
-        TTSLog("Hover gather: no readable text on hovered frame")
-        return nil
-    end
-
-    if ns.IsCheckbox(frame) and frame.GetChecked then
-        local ok, val = pcall(function() return frame:GetChecked() end)
-        if ok and val ~= nil then
-            text = text .. (val and " (checked)" or " (not checked)")
-        end
-    end
-
-    TTSLog("Hover gather: frame", frameName, "text:", text)
-    return text
-end
-
 -- Read out hovered control (gather-only). Returns gathered text string or nil.
 local function ReadHoveredButton()
     local frame = ExtractHoveredFrame()
     if not frame then return nil end
-    return ExtractTextFromHoveredFrame(frame)
+    return ExtractFrameText(frame)
 end
 
 -- Handle string input for TTS

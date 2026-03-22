@@ -378,54 +378,55 @@ ns.GetTextUnderMouse = function()
     return singleString
 end
 
+-- Helper function to format standard gold/silver/copper prices
+local function FormatStandardPrice(price)
+    local gold = math.floor(price / 10000)
+    local silver = math.floor((price % 10000) / 100)
+    local copper = price % 100
+
+    local parts = {}
+    if gold > 0 then table.insert(parts, gold .. " Gold") end
+    if silver > 0 then table.insert(parts, silver .. " Silver") end
+    if copper > 0 then table.insert(parts, copper .. " Copper") end
+
+    return table.concat(parts, ", ")
+end
+
+-- Helper function to format alternative currency prices
+local function FormatAlternativePrice(frameID, costCount)
+    local costParts = {}
+    for i = 1, costCount do
+        local _, amount, link, currencyName = GetMerchantItemCostItem(frameID, i)
+
+        if link then
+            local itemName = link:match("%[(.*)%]") or "Unknown Item"
+            table.insert(costParts, amount .. " " .. itemName)
+        elseif currencyName then
+            table.insert(costParts, amount .. " " .. currencyName)
+        end
+    end
+
+    if #costParts > 0 then
+        return table.concat(costParts, ", ")
+    end
+    return ""
+end
+
 ns.GetMerchantPriceText = function(frame)
     local frames = GetMouseFoci()
     for _, frame in ipairs(frames) do
-        -- Ensure we are looking at a valid merchant slot
         if not frame.GetID or frame:GetID() == 0 then return nil end
 
-        -- Get price from the API
         local inf = C_MerchantFrame.GetItemInfo(frame:GetID())
         if not inf then return "" end
 
-        -- Case 1: Standard Gold/Silver/Copper
         if inf.price > 0 then
-            local gold = math.floor(inf.price / 10000)
-            local silver = math.floor((inf.price % 10000) / 100)
-            local copper = inf.price % 100
-
-            local parts = {}
-            if gold > 0 then table.insert(parts, gold .. " Gold") end
-            if silver > 0 then table.insert(parts, silver .. " Silver") end
-            if copper > 0 then table.insert(parts, copper .. " Copper") end
-
-            return table.concat(parts, ", ")
+            return FormatStandardPrice(inf.price)
         end
 
-        -- Case 2: Alternative Currencies (Honor, Tokens, etc.)
         if inf.hasExtendedCost then
-            -- Get number of distinct alternative costs
             local costCount = GetMerchantItemCostInfo(frame:GetID())
-            local costParts = {}
-            for i = 1, costCount do
-                -- returns: texture, amount, itemLink, currencyName
-                local _, amount, link, currencyName = GetMerchantItemCostItem(frame:GetID(), i)
-
-                if link then
-                    -- It is an Item (e.g., "Mark of Honor")
-                    -- Extract clean name from link "[Name]" -> "Name"
-                    local itemName = link:match("%[(.*)%]") or "Unknown Item"
-                    table.insert(costParts, amount .. " " .. itemName)
-                elseif currencyName then
-                    -- It is a Currency (e.g., "Honor Points")
-                    table.insert(costParts, amount .. " " .. currencyName)
-                end
-            end
-
-            -- 5. Return formatted string or nil if free
-            if #costParts > 0 then
-                return table.concat(costParts, ", ")
-            end
+            return FormatAlternativePrice(frame:GetID(), costCount)
         end
     end
 
