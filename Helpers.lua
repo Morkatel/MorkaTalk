@@ -3,43 +3,57 @@ local addon, ns = ...
 -- Helper: attempt to extract readable text from a frame (heuristics)
 -- Moved here from Core.lua for reuse and clarity
 ---@param frame Frame
-local function TryGetTextFromFrame(f)
-    if not f then return nil end
-
-    -- 1) direct text via GetText
-    if f.GetText then
-        local t = f:GetText()
+local function TryGetTextFromDirect(frame)
+    if not frame then return nil end
+    if frame.GetText then
+        local t = frame:GetText()
         if t and t ~= "" then return t end
     end
+    return nil
+end
 
-    -- 2) common table/text fields (checkboxes sometimes store .text FontString or plain .text)
-    if f.text then
-        if type(f.text) == "string" then return f.text end
-        if f.text.GetText then
-            local t = f.text:GetText()
+---@param frame Frame
+local function TryGetTextFromFields(frame)
+    if not frame then return nil end
+    
+    -- Check .text field
+    if frame.text then
+        if type(frame.text) == "string" then return frame.text end
+        if frame.text.GetText then
+            local t = frame.text:GetText()
             if t and t ~= "" then return t end
         end
     end
-    if f.Text then
-        if type(f.Text) == "string" then return f.Text end
-        if f.Text.GetText then
-            local t = f.Text:GetText()
+    
+    -- Check .Text field
+    if frame.Text then
+        if type(frame.Text) == "string" then return frame.Text end
+        if frame.Text.GetText then
+            local t = frame.Text:GetText()
             if t and t ~= "" then return t end
         end
     end
+    
+    return nil
+end
 
-    -- 3) scroll frames: try the scroll child
-    if f.GetScrollChild then
-        local sc = f:GetScrollChild()
+---@param frame Frame
+local function TryGetTextFromScrollChild(frame)
+    if not frame then return nil end
+    if frame.GetScrollChild then
+        local sc = frame:GetScrollChild()
         if sc then
-            local t = TryGetTextFromFrame(sc)
-            if t and t ~= "" then return t end
+            return TryGetTextFromFrame(sc)
         end
     end
+    return nil
+end
 
-    -- 4) named globals like MyFrameText / MyFrameName / MyFrameLabel
-    if f.GetName then
-        local name = f:GetName()
+---@param frame Frame
+local function TryGetTextFromNamedGlobals(frame)
+    if not frame then return nil end
+    if frame.GetName then
+        local name = frame:GetName()
         if name and name ~= "" then
             for _, suffix in ipairs({ "Text", "Name", "Label", "Title", "NormalText" }) do
                 local g = _G[name .. suffix]
@@ -50,12 +64,16 @@ local function TryGetTextFromFrame(f)
             end
         end
     end
+    return nil
+end
 
-    -- 5) scan direct children for text-bearing widgets
-    if f.GetChildren then
+---@param frame Frame
+local function TryGetTextFromChildren(frame)
+    if not frame then return nil end
+    if frame.GetChildren then
         local i = 1
         while true do
-            local child = select(i, f:GetChildren())
+            local child = select(i, frame:GetChildren())
             if not child then break end
             if child.GetText then
                 local t = child:GetText()
@@ -64,10 +82,14 @@ local function TryGetTextFromFrame(f)
             i = i + 1
         end
     end
+    return nil
+end
 
-    -- 6) scan regions (FontStrings) which often hold labels for checkboxes and dropdowns
-    if f.GetRegions then
-        local regs = { f:GetRegions() }
+---@param frame Frame
+local function TryGetTextFromRegions(frame)
+    if not frame then return nil end
+    if frame.GetRegions then
+        local regs = { frame:GetRegions() }
         for _, r in ipairs(regs) do
             if r and r.GetText then
                 local t = r:GetText()
@@ -75,7 +97,29 @@ local function TryGetTextFromFrame(f)
             end
         end
     end
+    return nil
+end
 
+---@param frame Frame
+local function TryGetTextFromFrame(frame)
+    local text = TryGetTextFromDirect(frame)
+    if text then return text end
+    
+    text = TryGetTextFromFields(frame)
+    if text then return text end
+    
+    text = TryGetTextFromScrollChild(frame)
+    if text then return text end
+    
+    text = TryGetTextFromNamedGlobals(frame)
+    if text then return text end
+    
+    text = TryGetTextFromChildren(frame)
+    if text then return text end
+    
+    text = TryGetTextFromRegions(frame)
+    if text then return text end
+    
     return nil
 end
 
@@ -200,6 +244,33 @@ local function GetReadableTextFromFrame(frame)
 end
 
 ns.GetReadableTextFromFrame = GetReadableTextFromFrame
+
+---@param frame Frame
+local function ExtractFrameText(frame)
+    if not frame then return nil end
+    local frameName = frame:GetName() or "unnamed"
+    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
+
+    local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
+    local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
+
+    if not text or text == "" then
+        TTSLog("Hover gather: no readable text on hovered frame")
+        return nil
+    end
+
+    if ns.IsCheckbox(frame) and frame.GetChecked then
+        local ok, val = pcall(function() return frame:GetChecked() end)
+        if ok and val ~= nil then
+            text = text .. (val and " (checked)" or " (not checked)")
+        end
+    end
+
+    TTSLog("Hover gather: frame", frameName, "text:", text)
+    return text
+end
+
+ns.ExtractFrameText = ExtractFrameText
 
 -- Central TTS helpers
 ns.TTSLog = function(...)

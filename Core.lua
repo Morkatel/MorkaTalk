@@ -217,26 +217,7 @@ end
 -- Extract text from a frame
 local function ExtractFrameText(frame)
     if not frame then return nil end
-    local frameName = frame:GetName() or "unnamed"
-    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
-
-    local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
-    local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
-
-    if not text or text == "" then
-        TTSLog("Hover gather: no readable text on hovered frame")
-        return nil
-    end
-
-    if ns.IsCheckbox(frame) and frame.GetChecked then
-        local ok, val = pcall(function() return frame:GetChecked() end)
-        if ok and val ~= nil then
-            text = text .. (val and " (checked)" or " (not checked)")
-        end
-    end
-
-    TTSLog("Hover gather: frame", frameName, "text:", text)
-    return text
+    return ns.ExtractFrameText(frame)
 end
 
 -- Extract the frame currently under the mouse
@@ -320,40 +301,62 @@ local function Read(items)
     return true
 end
 
--- Handle CTRL key press event
-local function HandleCtrlKeyPress()
-    TTSLog("OnEvent START (CTRL)")
+-- Format auction buy info
+local function FormatAuctionBuyInfo(item)
+    return item.itemName .. ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', Quantity: ' .. item.totalQuantity
+end
+
+-- Format auction sell info
+local function FormatAuctionSellInfo(item)
+    return 'Price: ' ..
+        ns.GetFormattedPrice(item.price) ..
+        ', Quantity: ' .. item.totalQuantity .. ' from ' .. item.sellers .. ' sellers'
+end
+
+-- Format auction own info
+local function FormatAuctionOwnInfo(item)
+    return item.itemName ..
+        ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', ' .. SecondsToTime(item.timeLeft) .. ' remaining'
+end
+
+-- Add default parts for reading
+local function AddDefaultParts(parts)
     local priceText = ns.GetMerchantPriceText()
     local questTextParts = ns.GetQuestText()
     local hoverText = ns.GetTextUnderMouse()
     local tooltipParts = ReadAndSpeakGameTooltip()
+
+    if priceText then table.insert(parts, priceText) end
+    if tooltipParts then
+        for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
+    elseif hoverText then
+        table.insert(parts, hoverText)
+    elseif ns.IsQuestAvailable() then
+        for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
+    end
+end
+
+-- Gather parts for reading based on context
+local function GatherPartsForReading()
     local parts = {}
 
     if ns.LAST_HOVERED_AH_ITEM_BUY then
-        local itemName = ns.LAST_HOVERED_AH_ITEM_BUY.itemName
-        local price = ns.LAST_HOVERED_AH_ITEM_BUY.price
-        local totalQuantity = ns.LAST_HOVERED_AH_ITEM_BUY.totalQuantity
-        table.insert(parts, itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. totalQuantity)
+        table.insert(parts, FormatAuctionBuyInfo(ns.LAST_HOVERED_AH_ITEM_BUY))
     elseif ns.LAST_HOVERED_AH_ITEM_SELL then
-        local price = ns.LAST_HOVERED_AH_ITEM_SELL.price
-        local quantity = ns.LAST_HOVERED_AH_ITEM_SELL.totalQuantity
-        local sellers = ns.LAST_HOVERED_AH_ITEM_SELL.sellers
-        table.insert(parts, 'Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. quantity .. ' from ' .. sellers .. ' sellers')
+        table.insert(parts, FormatAuctionSellInfo(ns.LAST_HOVERED_AH_ITEM_SELL))
     elseif ns.LAST_HOVERED_AH_ITEM_OWN then
-        local itemName = ns.LAST_HOVERED_AH_ITEM_OWN.itemName
-        local price = ns.LAST_HOVERED_AH_ITEM_OWN.price
-        local timeLeft = ns.LAST_HOVERED_AH_ITEM_OWN.timeLeft
-        table.insert(parts, itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', ' .. SecondsToTime(timeLeft) .. ' remaining')
+        table.insert(parts, FormatAuctionOwnInfo(ns.LAST_HOVERED_AH_ITEM_OWN))
     else
-        if priceText then table.insert(parts, priceText) end
-        if tooltipParts then
-            for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
-        elseif hoverText then
-            table.insert(parts, hoverText)
-        elseif ns.IsQuestAvailable() then
-            for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
-        end
+        AddDefaultParts(parts)
     end
+
+    return parts
+end
+
+-- Handle CTRL key press event
+local function HandleCtrlKeyPress()
+    TTSLog("OnEvent START (CTRL)")
+    local parts = GatherPartsForReading()
 
     if #parts > 0 then
         Read(parts)
