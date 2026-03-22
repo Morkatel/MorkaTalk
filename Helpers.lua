@@ -320,52 +320,59 @@ ns.DebugFrameStack = function()
     debugFrame:Show()
 end
 
+-- Extract text from a frame or region
+local function ExtractTextFromObject(obj, foundText, seenText)
+    if obj.GetText and obj:IsVisible() then
+        local text = obj:GetText()
+        if text and text ~= "" and not seenText[text] then
+            table.insert(foundText, text)
+            seenText[text] = true
+        end
+    end
+end
+
+-- Extract text from regions of a frame
+local function ExtractTextFromRegions(frame, foundText, seenText)
+    local regions = { frame:GetRegions() }
+    for _, region in ipairs(regions) do
+        if region:GetObjectType() == "FontString" then
+            ExtractTextFromObject(region, foundText, seenText)
+        end
+    end
+end
+
+-- Extract text from children of a frame
+local function ExtractTextFromChildren(frame, foundText, seenText)
+    local children = { frame:GetChildren() }
+    for _, child in ipairs(children) do
+        if not child:IsMouseEnabled() then
+            ExtractTextFromObject(child, foundText, seenText)
+            local childRegions = { child:GetRegions() }
+            for _, cr in ipairs(childRegions) do
+                if cr:GetObjectType() == "FontString" then
+                    ExtractTextFromObject(cr, foundText, seenText)
+                end
+            end
+        end
+    end
+end
+
 ns.GetTextUnderMouse = function()
     local frames = GetMouseFoci()
     local foundText = {}
     local seenText = {} -- The lookup set (hash map)
 
-    -- Helper to check a specific frame/region for text
-    local function extractText(obj)
-        if obj.GetText and obj:IsVisible() then
-            local text = obj:GetText()
-            if text and text ~= "" and not seenText[text] then
-                table.insert(foundText, text)
-                seenText[text] = true
-            end
-        end
-    end
-
     for _, frame in ipairs(frames) do
         -- 1. Check if the frame itself has text (e.g., EditBoxes)
-        extractText(frame)
+        ExtractTextFromObject(frame, foundText, seenText)
 
         -- 2. Check all regions (FontStrings usually live here)
-        local regions = { frame:GetRegions() }
-        for _, region in ipairs(regions) do
-            if region:GetObjectType() == "FontString" then
-                extractText(region)
-            end
-        end
+        ExtractTextFromRegions(frame, foundText, seenText)
 
         -- 3. Check immediate children (for complex composite frames)
-        -- Careful: Deep recursion here can be slow; usually 1 level is enough.
-        local children = { frame:GetChildren() }
-        for _, child in ipairs(children) do
-            -- Only check children that don't capture mouse input themselves
-            -- (otherwise they'd already be in GetMouseFoci)
-            if not child:IsMouseEnabled() then
-                extractText(child)
-                -- Check child regions too
-                local childRegions = { child:GetRegions() }
-                for _, cr in ipairs(childRegions) do
-                    if cr:GetObjectType() == "FontString" then
-                        extractText(cr)
-                    end
-                end
-            end
-        end
+        ExtractTextFromChildren(frame, foundText, seenText)
     end
+
     -- Syntax: table.concat(table, separator)
     local singleString = table.concat(foundText, " ")
     return singleString

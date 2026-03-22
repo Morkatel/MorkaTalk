@@ -123,8 +123,8 @@ local function SkipLine()
     end
 end
 
--- Read all visible GameTooltip lines and return them as a table of strings (gather-only)
-local function ReadAndSpeakGameTooltip()
+-- Gather lines from the GameTooltip
+local function GatherTooltipLines()
     if not GameTooltip or not GameTooltip:IsShown() then return nil end
 
     local parts = {}
@@ -145,10 +145,22 @@ local function ReadAndSpeakGameTooltip()
         if text then table.insert(parts, text) end
     end
 
+    return parts
+end
+
+-- Process gathered tooltip lines
+local function ProcessTooltipLines(parts)
     if #parts == 0 then return nil end
 
     TTSLog("Tooltip gather lines:", #parts)
     return parts
+end
+
+-- Read all visible GameTooltip lines and return them as a table of strings (gather-only)
+local function ReadAndSpeakGameTooltip()
+    local parts = GatherTooltipLines()
+    if not parts then return nil end
+    return ProcessTooltipLines(parts)
 end
 
 -- Trigger tooltip read when Ctrl key is pressed; stop reading when released
@@ -241,14 +253,82 @@ local function ExtractFrameText(frame)
     return text
 end
 
--- Read out hovered control (gather-only). Returns gathered text string or nil.
-local function ReadHoveredButton()
+-- Extract the frame currently under the mouse
+local function ExtractHoveredFrame()
     local focus = GetHoveredFrame()
     if not focus then
         TTSLog("Hover gather: no frame under mouse")
         return nil
     end
-    return ExtractFrameText(focus)
+    return focus
+end
+
+-- Extract text from the hovered frame
+local function ExtractTextFromHoveredFrame(frame)
+    if not frame then return nil end
+    local frameName = frame:GetName() or "unnamed"
+    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
+
+    local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
+    local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
+
+    if not text or text == "" then
+        TTSLog("Hover gather: no readable text on hovered frame")
+        return nil
+    end
+
+    if ns.IsCheckbox(frame) and frame.GetChecked then
+        local ok, val = pcall(function() return frame:GetChecked() end)
+        if ok and val ~= nil then
+            text = text .. (val and " (checked)" or " (not checked)")
+        end
+    end
+
+    TTSLog("Hover gather: frame", frameName, "text:", text)
+    return text
+end
+
+-- Read out hovered control (gather-only). Returns gathered text string or nil.
+local function ReadHoveredButton()
+    local frame = ExtractHoveredFrame()
+    if not frame then return nil end
+    return ExtractTextFromHoveredFrame(frame)
+end
+
+-- Handle string input for TTS
+local function HandleStringInput(text)
+    table.insert(tts_lines, text)
+end
+
+-- Handle table input for TTS
+local function HandleTableInput(items)
+    for _, value in ipairs(items) do
+        table.insert(tts_lines, value)
+    end
+end
+
+-- Process secret values in the TTS lines
+local function ProcessSecretValues()
+    if #tts_lines > 1 and issecretvalue(tts_lines[2]) then
+        local result = ""
+        for i = 1, #tts_lines do
+            result = string.concat(result, tts_lines[i], " ")
+        end
+        tts_lines = {}
+        TTSLog("Read concatenated secret text")
+        ns.ReadText(result)
+        return true
+    end
+    return false
+end
+
+-- Queue lines for sequential reading
+local function QueueLinesForReading()
+    tts_idx = 1
+    if tts_skip_button then
+        tts_skip_button:Show()
+    end
+    ns.SpeakCurrentLine()
 end
 
 -- Read function: accepts a string or a table of strings and starts queued TTS for them
@@ -259,12 +339,9 @@ local function Read(items)
     -- end
 
     if type(items) == "string" then
-        table.insert(tts_lines, items)
+        HandleStringInput(items)
     elseif type(items) == "table" then
-        -- Use a loop to append each new item to the existing list
-        for _, value in ipairs(items) do
-            table.insert(tts_lines, value)
-        end
+        HandleTableInput(items)
     else
         return false
     end
@@ -274,31 +351,11 @@ local function Read(items)
         return false
     end
 
-    -- print("aaaaaaaaaaaaaa")
-    -- print(parts[2])
-    if #tts_lines > 1 and issecretvalue(tts_lines[2]) then
-        local result = ""
-        for i = 1, #tts_lines do
-            result = string.concat(result, tts_lines[i], " ")
-        end
-        tts_lines = {}
-        -- print(result)
-        TTSLog("Read concatenated secret text")
-
-        ns.ReadText(result)
-    else
-        -- Queue lines for sequential reading
-        tts_idx = 1
-
-        -- show skip button while reading
-        if tts_skip_button then
-            tts_skip_button:Show()
-        end
-
-        -- start speaking the first queued line
-        ns.SpeakCurrentLine()
+    if ProcessSecretValues() then
+        return true
     end
 
+    QueueLinesForReading()
     return true
 end
 
