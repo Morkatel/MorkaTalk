@@ -25,17 +25,7 @@ local function OnInboxUpdate()
 end
 
 ns.OnInboxShown = function()
-    local frames = GetMouseFoci()
-    -- DevTools_Dump(frames)
-    -- for frame in frames do
-    --     print("------------------")
-    --     DevTools_Dump(frame)
-    --     if frame and frame:GetName() and frame:GetName():find("MailItem%d+Button") then
-    --         local index = frame:GetID() -- Returns 1 through 7
-    --         -- index now represents the inbox slot currently hovered
-    --     end
-    -- end
-
+    local frames = ns.GetFrameStack()
     for i, frame in ipairs(frames) do
         local name = frame:GetName() or "unnamed"
         local text = ns.GetReadableTextFromFrame(frame)

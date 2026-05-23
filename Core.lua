@@ -57,39 +57,28 @@ local function ValidateQueue()
     return true
 end
 
--- Process the current line (extract text, read aloud)
-local function ProcessCurrentLine()
-    local text = table.remove(tts_lines, 1)
-    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
-    local text_len = issecretvalue(text) and 1 or #text
-    if not text or text_len == 0 then
-        tts_idx = tts_idx + 1
-        C_Timer.After(0.01, ns.SpeakCurrentLine)
-        return
-    end
 
-    ns.is_speaking = true
-    ns.ReadText(text)
-    return text, text_len
+
+-- Extract the current line text
+local function ExtractCurrentLineText()
+    local text, text_len, new_tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
+    if not text then return nil, 0 end
+    return text, text_len, new_tts_idx
+end
+
+-- Read the extracted line aloud
+local function ReadCurrentLineAloud(text)
+    ns.ReadTextAloud(text, ns)
+end
+
+-- Calculate the duration for the current line
+local function CalculateLineDuration(text)
+    return ns.CalculateSpeechDuration(text, ns)
 end
 
 -- Schedule the next line based on estimated time
-local function ScheduleNextLine(text, text_len)
-    if C_Timer and text_len and text_len > 0 then
-        if issecretvalue(text) == false then
-            local est = ns.EstimateSpeechDuration(text)
-            ns.SafeCancelTimer(tts_timer)
-            tts_timer = nil
-            tts_timer = C_Timer.NewTimer(est + 0.2, function()
-                tts_idx = tts_idx + 1
-                ns.SpeakCurrentLine()
-            end)
-        else
-            print("SECRET SKIPPED")
-        end
-    else
-        ns.is_speaking = false
-    end
+local function ScheduleNextTimerForLine(est, text_len)
+    tts_timer, tts_idx = ns.ScheduleNextTimer(est, tts_timer, tts_idx, ns)
 end
 
 -- Speak the current queued line (internal)
@@ -98,8 +87,11 @@ ns.SpeakCurrentLine = function()
         return
     end
 
-    local text, text_len = ProcessCurrentLine()
-    ScheduleNextLine(text, text_len)
+    local text, text_len, new_tts_idx = ExtractCurrentLineText()
+    if not text then return end
+    ReadCurrentLineAloud(text)
+    local est = CalculateLineDuration(text)
+    ScheduleNextTimerForLine(est, text_len)
 end
 
 -- Skip current line and move to next
@@ -123,8 +115,8 @@ local function SkipLine()
     end
 end
 
--- Read all visible GameTooltip lines and return them as a table of strings (gather-only)
-local function ReadAndSpeakGameTooltip()
+-- Gather lines from the GameTooltip
+local function GatherTooltipLines()
     if not GameTooltip or not GameTooltip:IsShown() then return nil end
 
     local parts = {}
@@ -145,7 +137,13 @@ local function ReadAndSpeakGameTooltip()
         if text then table.insert(parts, text) end
     end
 
-    if #parts == 0 then return nil end
+    return parts
+end
+
+-- Read all visible GameTooltip lines and return them as a table of strings (gather-only)
+local function ReadAndSpeakGameTooltip()
+    local parts = GatherTooltipLines()
+    if not parts or #parts == 0 then return nil end
 
     TTSLog("Tooltip gather lines:", #parts)
     return parts
@@ -219,87 +217,180 @@ end
 -- Extract text from a frame
 local function ExtractFrameText(frame)
     if not frame then return nil end
-    local frameName = frame:GetName() or "unnamed"
-    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
-
-    local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
-    local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
-
-    if not text or text == "" then
-        TTSLog("Hover gather: no readable text on hovered frame")
-        return nil
-    end
-
-    if ns.IsCheckbox(frame) and frame.GetChecked then
-        local ok, val = pcall(function() return frame:GetChecked() end)
-        if ok and val ~= nil then
-            text = text .. (val and " (checked)" or " (not checked)")
-        end
-    end
-
-    TTSLog("Hover gather: frame", frameName, "text:", text)
-    return text
+    return ns.ExtractFrameText(frame)
 end
 
--- Read out hovered control (gather-only). Returns gathered text string or nil.
-local function ReadHoveredButton()
+-- Extract the frame currently under the mouse
+local function ExtractHoveredFrame()
     local focus = GetHoveredFrame()
     if not focus then
         TTSLog("Hover gather: no frame under mouse")
         return nil
     end
-    return ExtractFrameText(focus)
+    return focus
 end
 
--- Read function: accepts a string or a table of strings and starts queued TTS for them
-local function Read(items)
-    -- if ns.is_speaking then
-    --     TTSLog("Read suppressed: already speaking")
-    --     return false
-    -- end
+-- Read out hovered control (gather-only). Returns gathered text string or nil.
+local function ReadHoveredButton()
+    local frame = ExtractHoveredFrame()
+    if not frame then return nil end
+    return ExtractFrameText(frame)
+end
 
-    if type(items) == "string" then
-        table.insert(tts_lines, items)
-    elseif type(items) == "table" then
-        -- Use a loop to append each new item to the existing list
-        for _, value in ipairs(items) do
-            table.insert(tts_lines, value)
-        end
-    else
-        return false
+-- Handle string input for TTS
+local function HandleStringInput(text)
+    table.insert(tts_lines, text)
+end
+
+-- Handle table input for TTS
+local function HandleTableInput(items)
+    for _, value in ipairs(items) do
+        table.insert(tts_lines, value)
     end
+end
 
-    if not tts_lines or #tts_lines == 0 then
-        TTSLog("Read: no parts to speak")
-        return false
-    end
-
-    -- print("aaaaaaaaaaaaaa")
-    -- print(parts[2])
+-- Process secret values in the TTS lines
+local function ProcessSecretValues()
     if #tts_lines > 1 and issecretvalue(tts_lines[2]) then
         local result = ""
         for i = 1, #tts_lines do
             result = string.concat(result, tts_lines[i], " ")
         end
         tts_lines = {}
-        -- print(result)
         TTSLog("Read concatenated secret text")
-
         ns.ReadText(result)
-    else
-        -- Queue lines for sequential reading
-        tts_idx = 1
-
-        -- show skip button while reading
-        if tts_skip_button then
-            tts_skip_button:Show()
-        end
-
-        -- start speaking the first queued line
-        ns.SpeakCurrentLine()
+        return true
     end
+    return false
+end
 
+-- Queue lines for sequential reading
+local function QueueLinesForReading()
+    tts_idx = 1
+    if tts_skip_button then
+        tts_skip_button:Show()
+    end
+    ns.SpeakCurrentLine()
+end
+
+-- Handle input for reading
+local function HandleInput(items)
+    if type(items) == "string" then
+        HandleStringInput(items)
+    elseif type(items) == "table" then
+        HandleTableInput(items)
+    else
+        return false
+    end
     return true
+end
+
+-- Validate input for reading
+local function ValidateInput()
+    if not tts_lines or #tts_lines == 0 then
+        TTSLog("Read: no parts to speak")
+        return false
+    end
+    return true
+end
+
+-- Read function: accepts a string or a table of strings and starts queued TTS for them
+local function Read(items)
+    if not HandleInput(items) then
+        return false
+    end
+    if not ValidateInput() then
+        return false
+    end
+    if ProcessSecretValues() then
+        return true
+    end
+    QueueLinesForReading()
+    return true
+end
+
+-- Format auction buy info
+local function FormatAuctionBuyInfo(item)
+    return item.itemName .. ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', Quantity: ' .. item.totalQuantity
+end
+
+-- Format auction sell info
+local function FormatAuctionSellInfo(item)
+    return 'Price: ' ..
+        ns.GetFormattedPrice(item.price) ..
+        ', Quantity: ' .. item.totalQuantity .. ' from ' .. item.sellers .. ' sellers'
+end
+
+-- Format auction own info
+local function FormatAuctionOwnInfo(item)
+    return item.itemName ..
+        ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', ' .. SecondsToTime(item.timeLeft) .. ' remaining'
+end
+
+-- Gather auction parts for reading
+local function GatherAuctionParts(parts)
+    if ns.LAST_HOVERED_AH_ITEM_BUY then
+        table.insert(parts, FormatAuctionBuyInfo(ns.LAST_HOVERED_AH_ITEM_BUY))
+    elseif ns.LAST_HOVERED_AH_ITEM_SELL then
+        table.insert(parts, FormatAuctionSellInfo(ns.LAST_HOVERED_AH_ITEM_SELL))
+    elseif ns.LAST_HOVERED_AH_ITEM_OWN then
+        table.insert(parts, FormatAuctionOwnInfo(ns.LAST_HOVERED_AH_ITEM_OWN))
+    end
+end
+
+-- Gather default parts for reading
+local function GatherDefaultParts(parts)
+    local priceText = ns.GetMerchantPriceText()
+    local questTextParts = ns.GetQuestText()
+    local hoverText = ns.GetTextUnderMouse()
+    local tooltipParts = ReadAndSpeakGameTooltip()
+
+    if priceText then table.insert(parts, priceText) end
+    if tooltipParts then
+        for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
+    elseif hoverText then
+        table.insert(parts, hoverText)
+    elseif ns.IsQuestAvailable() then
+        for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
+    end
+end
+
+-- Gather parts for reading based on context
+local function GatherPartsForReading()
+    local parts = {}
+    GatherAuctionParts(parts)
+    if #parts == 0 then
+        GatherDefaultParts(parts)
+    end
+    return parts
+end
+
+-- Process gathered parts for reading
+local function ProcessPartsForReading(parts)
+    if #parts > 0 then
+        Read(parts)
+    else
+        TTSLog("OnEvent CTRL: nothing to read")
+    end
+end
+
+-- Handle CTRL key press event
+local function HandleCtrlKeyPress()
+    TTSLog("OnEvent START (CTRL)")
+    local parts = GatherPartsForReading()
+    ProcessPartsForReading(parts)
+end
+
+-- Handle LSHIFT key press event
+local function HandleShiftKeyPress()
+    TTSLog("OnEvent STOP")
+    StopSpeaking()
+end
+
+-- Handle LALT key press event
+local function HandleAltKeyPress()
+    TTSLog("OnEvent SKIP")
+    SkipLine()
 end
 
 local tooltipKeyListener = CreateFrame("Frame", "BSTooltipKeyListener")
@@ -307,94 +398,12 @@ tooltipKeyListener:RegisterEvent("MODIFIER_STATE_CHANGED")
 tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
     if not key then return end
     TTSLog(event .. " " .. key .. " " .. down)
-    if string.find(key, "CTRL") then
-        if down == 1 then
-            TTSLog("OnEvent START (CTRL)")
-
-            -- ns.OnInboxShown()
-
-            -- local f = EnumerateFrames()
-            -- while f do
-            --     if f:IsVisible() and f:IsMouseOver() then
-            --         print(f:GetDebugName())
-            --         DevTools_Dump(f)
-
-            --         if f.GetText then
-            --             Read(f.GetText())
-            --             return
-            --         end
-            --         if f.Text then
-            --             Read(f.Text:GetText())
-            --             return
-            --         end
-            --         break
-            --     end
-            --     f = EnumerateFrames(f)
-            -- end
-
-            -- Gather hover text and tooltip lines, then read them if anything gathered
-            -- local hoverText = ReadHoveredButton()
-            local priceText = ns.GetMerchantPriceText()
-            local questTextParts = ns.GetQuestText()
-            local hoverText = ns.GetTextUnderMouse()
-            local tooltipParts = ReadAndSpeakGameTooltip()
-            local parts = {}
-
-            if ns.LAST_HOVERED_AH_ITEM_BUY then
-                local itemName = ns.LAST_HOVERED_AH_ITEM_BUY.itemName
-                local price = ns.LAST_HOVERED_AH_ITEM_BUY.price
-                local totalQuantity = ns.LAST_HOVERED_AH_ITEM_BUY.totalQuantity
-
-                table.insert(parts,
-                    itemName .. ', Price: ' .. ns.GetFormattedPrice(price) .. ', Quantity: ' .. totalQuantity)
-            elseif ns.LAST_HOVERED_AH_ITEM_SELL then
-                local price = ns.LAST_HOVERED_AH_ITEM_SELL.price
-                local quantity = ns.LAST_HOVERED_AH_ITEM_SELL.totalQuantity
-                local sellers = ns.LAST_HOVERED_AH_ITEM_SELL.sellers
-
-                table.insert(parts,
-                    'Price: ' ..
-                    ns.GetFormattedPrice(price) .. ', Quantity: ' .. quantity .. ' from ' .. sellers .. ' sellers')
-            elseif ns.LAST_HOVERED_AH_ITEM_OWN then
-                local itemName = ns.LAST_HOVERED_AH_ITEM_OWN.itemName
-                local price = ns.LAST_HOVERED_AH_ITEM_OWN.price
-                local timeLeft = ns.LAST_HOVERED_AH_ITEM_OWN.timeLeft
-
-                table.insert(parts,
-                    itemName ..
-                    ', Price: ' .. ns.GetFormattedPrice(price) .. ', ' .. SecondsToTime(timeLeft) .. ' remaining')
-            else
-                if priceText then
-                    table.insert(parts, priceText)
-                end
-
-                if tooltipParts then
-                    for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
-                elseif hoverText then
-                    table.insert(parts, hoverText)
-                elseif ns.IsQuestAvailable() then
-                    for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
-                end
-            end
-
-            if #parts > 0 then
-                Read(parts)
-            else
-                TTSLog("OnEvent CTRL: nothing to read")
-            end
-        end
-    end
-    if string.find(key, "LSHIFT") then
-        if down == 1 then
-            TTSLog("OnEvent STOP")
-            StopSpeaking()
-        end
-    end
-    if string.find(key, "LALT") then
-        if down == 1 then
-            TTSLog("OnEvent SKIP")
-            SkipLine()
-        end
+    if string.find(key, "CTRL") and down == 1 then
+        HandleCtrlKeyPress()
+    elseif string.find(key, "LSHIFT") and down == 1 then
+        HandleShiftKeyPress()
+    elseif string.find(key, "LALT") and down == 1 then
+        HandleAltKeyPress()
     end
 end)
 
