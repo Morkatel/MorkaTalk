@@ -15,7 +15,7 @@ end
 ---@param frame Frame
 local function TryGetTextFromFields(frame)
     if not frame then return nil end
-    
+
     -- Check .text field
     if frame.text then
         if type(frame.text) == "string" then return frame.text end
@@ -24,7 +24,7 @@ local function TryGetTextFromFields(frame)
             if t and t ~= "" then return t end
         end
     end
-    
+
     -- Check .Text field
     if frame.Text then
         if type(frame.Text) == "string" then return frame.Text end
@@ -33,7 +33,7 @@ local function TryGetTextFromFields(frame)
             if t and t ~= "" then return t end
         end
     end
-    
+
     return nil
 end
 
@@ -59,7 +59,7 @@ local function TryGetTextFromNamedGlobals(frame)
                 local g = _G[name .. suffix]
                 if g and g.GetText then
                     local t = g:GetText()
-                    if t and t ~= "" then return t end
+                    if not issecretvalue(t) and t and t ~= "" then return t end
                 end
             end
         end
@@ -93,7 +93,7 @@ local function TryGetTextFromRegions(frame)
         for _, r in ipairs(regs) do
             if r and r.GetText then
                 local t = r:GetText()
-                if t and t ~= "" then return t end
+                if not issecretvalue(t) and t and t ~= "" then return t end
             end
         end
     end
@@ -104,22 +104,22 @@ end
 local function TryGetTextFromFrame(frame)
     local text = TryGetTextFromDirect(frame)
     if text then return text end
-    
+
     text = TryGetTextFromFields(frame)
     if text then return text end
-    
+
     text = TryGetTextFromScrollChild(frame)
     if text then return text end
-    
+
     text = TryGetTextFromNamedGlobals(frame)
     if text then return text end
-    
+
     text = TryGetTextFromChildren(frame)
     if text then return text end
-    
+
     text = TryGetTextFromRegions(frame)
     if text then return text end
-    
+
     return nil
 end
 
@@ -496,6 +496,12 @@ ns.GetTextUnderMouse = function()
         ExtractTextFromChildren(frame, foundText, seenText)
     end
 
+    for _, frame in ipairs(frames) do
+        local name = frame:GetName() or "unnamed"
+        local text = ns.GetReadableTextFromFrame(frame)
+        ns.TTSLog("Hover gather: frame", name, "text:", text or "(none)")
+    end
+
     -- Syntax: table.concat(table, separator)
     local singleString = table.concat(foundText, " ")
     return singleString
@@ -536,20 +542,23 @@ local function FormatAlternativePrice(frameID, costCount)
 end
 
 ns.GetMerchantPriceText = function(frame)
-    local frames = GetMouseFoci()
-    for _, frame in ipairs(frames) do
-        if not frame.GetID or frame:GetID() == 0 then return nil end
+    if not (MerchantFrame and MerchantFrame:IsShown()) then return "" end
 
-        local inf = C_MerchantFrame.GetItemInfo(frame:GetID())
-        if not inf then return "" end
+    for _, f in ipairs(GetMouseFoci()) do
+        if f == MerchantFrame or RegionUtil.IsDescendantOf(f, MerchantFrame) then
+            local id = f:GetID()
+            if not id or id == 0 then return nil end
 
-        if inf.price > 0 then
-            return FormatStandardPrice(inf.price)
-        end
+            local inf = C_MerchantFrame.GetItemInfo(id)
+            if not inf then return "" end
 
-        if inf.hasExtendedCost then
-            local costCount = GetMerchantItemCostInfo(frame:GetID())
-            return FormatAlternativePrice(frame:GetID(), costCount)
+            if inf.price > 0 then
+                return FormatStandardPrice(inf.price)
+            end
+
+            if inf.hasExtendedCost then
+                return FormatAlternativePrice(id, GetMerchantItemCostInfo(id))
+            end
         end
     end
 
