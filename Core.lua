@@ -375,35 +375,66 @@ local function ProcessPartsForReading(parts)
 end
 
 -- Handle CTRL key press event
-local function HandleCtrlKeyPress()
+local function HandleStartAction()
     TTSLog("OnEvent START (CTRL)")
     local parts = GatherPartsForReading()
     ProcessPartsForReading(parts)
 end
 
 -- Handle LSHIFT key press event
-local function HandleShiftKeyPress()
+local function HandleStopAction()
     TTSLog("OnEvent STOP")
     StopSpeaking()
 end
 
 -- Handle LALT key press event
-local function HandleAltKeyPress()
+local function HandleSkipAction()
     TTSLog("OnEvent SKIP")
     SkipLine()
 end
 
+-- Default key bindings used on first load or when SavedVariables are absent.
+-- Keys are exact WoW modifier key names (LCTRL, RCTRL, LSHIFT, RSHIFT, LALT, RALT).
+local defaultKeys = {
+    start = "LCTRL",
+    stop  = "LALT",
+    skip  = "",
+}
+
+-- Maps action name → handler function.
+-- The options window writes to MorkaUIDB.keys; this table stays static.
+local actionHandlers = {
+    start = HandleStartAction,
+    stop  = HandleStopAction,
+    skip  = HandleSkipAction,
+}
+
+-- Initialize SavedVariables on load and backfill any keys added in newer versions.
+local initFrame = CreateFrame("Frame")
+initFrame:RegisterEvent("ADDON_LOADED")
+initFrame:SetScript("OnEvent", function(self, event, addonName)
+    if addonName ~= addon then return end
+    MorkaUIDB = MorkaUIDB or {}
+    MorkaUIDB.keys = MorkaUIDB.keys or CopyTable(defaultKeys)
+    for action, key in pairs(defaultKeys) do
+        if MorkaUIDB.keys[action] == nil then
+            MorkaUIDB.keys[action] = key
+        end
+    end
+    self:UnregisterEvent("ADDON_LOADED")
+end)
+
 local tooltipKeyListener = CreateFrame("Frame", "BSTooltipKeyListener")
 tooltipKeyListener:RegisterEvent("MODIFIER_STATE_CHANGED")
 tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
-    if not key then return end
+    if not key or down ~= 1 then return end
     TTSLog(event .. " " .. key .. " " .. down)
-    if string.find(key, "CTRL") and down == 1 then
-        HandleCtrlKeyPress()
-    elseif string.find(key, "LSHIFT") and down == 1 then
-        HandleShiftKeyPress()
-    elseif string.find(key, "LALT") and down == 1 then
-        HandleAltKeyPress()
+    for action, boundKey in pairs(MorkaUIDB.keys) do
+        if key == boundKey then
+            local handler = actionHandlers[action]
+            if handler then handler() end
+            return
+        end
     end
 end)
 

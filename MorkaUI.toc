@@ -3,6 +3,7 @@
 ## Notes: EditMode Profile Switcher
 ## Author: Morkatel
 ## Version: 0.1
+## SavedVariables: MorkaUIDB
 
 QuestFrame.lua
 NpcChat.lua
