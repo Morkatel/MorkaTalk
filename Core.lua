@@ -1,119 +1,11 @@
 local addon, ns = ...
 
-ns.is_speaking = false
 ns.TTS_DEBUG = false -- set to true to enable verbose TTS debug logging
 
--- TTS queue and control variables
-local tts_lines = {}        -- list of lines to speak
-local tts_idx = 0           -- current line index in tts_lines (1-based)
-local tts_timer = nil       -- timer object for the current line
-local tts_skip_button = nil -- UI button for skipping lines
 -- Flags for presence of certain UI APIs
 
 -- Centralized debug logger: use helper implementation from Helpers.lua
 local TTSLog = ns.TTSLog
-
--- Stop the currently ongoing speech only (keeps the queue intact)
-local function StopCurrentSpeech()
-    TTSLog("Stopping current speech (queue preserved)")
-    ns.is_speaking = false
-    if tts_timer and tts_timer.Cancel then
-        tts_timer:Cancel()
-        tts_timer = nil
-    end
-
-    if C_VoiceChat then
-        if C_VoiceChat.StopSpeakingText then
-            C_VoiceChat.StopSpeakingText()
-            TTSLog("Called C_VoiceChat.StopSpeakingText")
-        end
-    end
-end
-
-ns.ReadText = function(text)
-    local voiceID, rate, volume = ns.GetTTSSettings()
-    local text_len = issecretvalue(text) and 1 or #text
-
-    TTSLog("Speak line", tts_idx, "of", #tts_lines, "len:", text_len)
-    if C_VoiceChat and C_VoiceChat.SpeakText then
-        C_VoiceChat.SpeakText(voiceID, text, rate, volume, false)
-    else
-        TTSLog("C_VoiceChat.SpeakText not available")
-    end
-end
-
--- Validate if there are lines to speak
-local function ValidateQueue()
-    if not tts_lines or tts_idx == 0 or tts_idx > #tts_lines then
-        TTSLog("No more lines to speak")
-        tts_lines = {}
-        tts_idx = 0
-        if tts_skip_button then
-            tts_skip_button:Hide()
-        end
-        ns.is_speaking = false
-        return false
-    end
-    return true
-end
-
-
-
--- Extract the current line text
-local function ExtractCurrentLineText()
-    local text, text_len, new_tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
-    if not text then return nil, 0 end
-    return text, text_len, new_tts_idx
-end
-
--- Read the extracted line aloud
-local function ReadCurrentLineAloud(text)
-    ns.ReadTextAloud(text, ns)
-end
-
--- Calculate the duration for the current line
-local function CalculateLineDuration(text)
-    return ns.CalculateSpeechDuration(text, ns)
-end
-
--- Schedule the next line based on estimated time
-local function ScheduleNextTimerForLine(est, text_len)
-    tts_timer, tts_idx = ns.ScheduleNextTimer(est, tts_timer, tts_idx, ns)
-end
-
--- Speak the current queued line (internal)
-ns.SpeakCurrentLine = function()
-    if not ValidateQueue() then
-        return
-    end
-
-    local text, text_len, new_tts_idx = ExtractCurrentLineText()
-    if not text then return end
-    ReadCurrentLineAloud(text)
-    local est = CalculateLineDuration(text)
-    ScheduleNextTimerForLine(est, text_len)
-end
-
--- Skip current line and move to next
-local function SkipLine()
-    if not tts_lines or tts_idx == 0 then return end
-    TTSLog("Skipping line", tts_idx)
-    -- stop current speech (preserve queue)
-    StopCurrentSpeech()
-
-    -- move to next line and continue
-    tts_idx = tts_idx + 1
-    if tts_idx <= #tts_lines then
-        ns.SpeakCurrentLine()
-    else
-        -- finished
-        tts_lines = {}
-        tts_idx = 0
-        if tts_skip_button then
-            tts_skip_button:Hide()
-        end
-    end
-end
 
 -- Gather lines from the GameTooltip
 local function GatherTooltipLines()
@@ -150,43 +42,6 @@ local function ReadAndSpeakGameTooltip()
 end
 
 -- Trigger tooltip read when Ctrl key is pressed; stop reading when released
-
-local function StopSpeaking()
-    TTSLog("Attempt to STOP SPEAKING")
-
-    -- clear speaking state and queued lines
-    ns.is_speaking = false
-    tts_lines = {}
-    tts_idx = 0
-
-    -- cancel any running timer
-    if tts_timer and tts_timer.Cancel then
-        tts_timer:Cancel()
-        tts_timer = nil
-    end
-
-    if tts_skip_button then
-        tts_skip_button:Hide()
-    end
-
-    -- try common C_VoiceChat stop/cancel APIs safely
-    if C_VoiceChat then
-        if C_VoiceChat.StopSpeakingText then
-            C_VoiceChat.StopSpeakingText()
-            TTSLog("Called C_VoiceChat.StopSpeakingText")
-        end
-        if C_VoiceChat.CancelSpeakText then
-            C_VoiceChat.CancelSpeakText()
-            TTSLog("Called C_VoiceChat.CancelSpeakText")
-        end
-        if C_VoiceChat.CancelSpeaking then
-            C_VoiceChat.CancelSpeaking()
-            TTSLog("Called C_VoiceChat.CancelSpeaking")
-        end
-    else
-        TTSLog("C_VoiceChat not available")
-    end
-end
 
 -- Helper: attempt to extract readable text from a frame (heuristics)
 -- GetReadableTextFromFrame moved to `Helpers.lua` and exported as `ns.GetReadableTextFromFrame`
@@ -235,78 +90,6 @@ local function ReadHoveredButton()
     local frame = ExtractHoveredFrame()
     if not frame then return nil end
     return ExtractFrameText(frame)
-end
-
--- Handle string input for TTS
-local function HandleStringInput(text)
-    table.insert(tts_lines, text)
-end
-
--- Handle table input for TTS
-local function HandleTableInput(items)
-    for _, value in ipairs(items) do
-        table.insert(tts_lines, value)
-    end
-end
-
--- Process secret values in the TTS lines
-local function ProcessSecretValues()
-    if #tts_lines > 1 and issecretvalue(tts_lines[2]) then
-        local result = ""
-        for i = 1, #tts_lines do
-            result = string.concat(result, tts_lines[i], " ")
-        end
-        tts_lines = {}
-        TTSLog("Read concatenated secret text")
-        ns.ReadText(result)
-        return true
-    end
-    return false
-end
-
--- Queue lines for sequential reading
-local function QueueLinesForReading()
-    tts_idx = 1
-    if tts_skip_button then
-        tts_skip_button:Show()
-    end
-    ns.SpeakCurrentLine()
-end
-
--- Handle input for reading
-local function HandleInput(items)
-    if type(items) == "string" then
-        HandleStringInput(items)
-    elseif type(items) == "table" then
-        HandleTableInput(items)
-    else
-        return false
-    end
-    return true
-end
-
--- Validate input for reading
-local function ValidateInput()
-    if not tts_lines or #tts_lines == 0 then
-        TTSLog("Read: no parts to speak")
-        return false
-    end
-    return true
-end
-
--- Read function: accepts a string or a table of strings and starts queued TTS for them
-local function Read(items)
-    if not HandleInput(items) then
-        return false
-    end
-    if not ValidateInput() then
-        return false
-    end
-    if ProcessSecretValues() then
-        return true
-    end
-    QueueLinesForReading()
-    return true
 end
 
 -- Format auction buy info
@@ -365,71 +148,37 @@ local function GatherPartsForReading()
     return parts
 end
 
--- Process gathered parts for reading
-local function ProcessPartsForReading(parts)
-    if #parts > 0 then
-        Read(parts)
-    else
-        TTSLog("OnEvent CTRL: nothing to read")
-    end
-end
-
--- Handle CTRL key press event
 local function HandleStartAction()
     TTSLog("OnEvent START (CTRL)")
     local parts = GatherPartsForReading()
-    ProcessPartsForReading(parts)
+    ns.ProcessPartsForReading(parts)
 end
 
--- Handle LSHIFT key press event
 local function HandleStopAction()
     TTSLog("OnEvent STOP")
-    StopSpeaking()
+    ns.StopSpeaking()
 end
 
--- Handle LALT key press event
 local function HandleSkipAction()
     TTSLog("OnEvent SKIP")
-    SkipLine()
+    ns.SkipLine()
 end
 
--- Default key bindings used on first load or when SavedVariables are absent.
--- Keys are exact WoW modifier key names (LCTRL, RCTRL, LSHIFT, RSHIFT, LALT, RALT).
-local defaultKeys = {
-    start = "LCTRL",
-    stop  = "LALT",
-    skip  = "",
-}
 
--- Maps action name → handler function.
--- The options window writes to MorkaUIDB.keys; this table stays static.
+-- Maps action name -> handler function.
 local actionHandlers = {
     start = HandleStartAction,
     stop  = HandleStopAction,
     skip  = HandleSkipAction,
 }
 
--- Initialize SavedVariables on load and backfill any keys added in newer versions.
-local initFrame = CreateFrame("Frame")
-initFrame:RegisterEvent("ADDON_LOADED")
-initFrame:SetScript("OnEvent", function(self, event, addonName)
-    if addonName ~= addon then return end
-    MorkaUIDB = MorkaUIDB or {}
-    MorkaUIDB.keys = MorkaUIDB.keys or CopyTable(defaultKeys)
-    for action, key in pairs(defaultKeys) do
-        if MorkaUIDB.keys[action] == nil then
-            MorkaUIDB.keys[action] = key
-        end
-    end
-    self:UnregisterEvent("ADDON_LOADED")
-end)
 
 local tooltipKeyListener = CreateFrame("Frame", "BSTooltipKeyListener")
 tooltipKeyListener:RegisterEvent("MODIFIER_STATE_CHANGED")
 tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
     if not key or down ~= 1 then return end
-    TTSLog(event .. " " .. key .. " " .. down)
-    for action, boundKey in pairs(MorkaUIDB.keys) do
+    ns.TTSLog(event .. " " .. key .. " " .. down)
+    for action, boundKey in pairs(MorkaTalkDB.keys) do
         if key == boundKey then
             local handler = actionHandlers[action]
             if handler then handler() end
@@ -439,7 +188,7 @@ tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
 end)
 
 -- Create a simple Skip button shown while reading
-tts_skip_button = CreateFrame("Button", "MorkaUI_TTS_SkipButton", UIParent, "UIPanelButtonTemplate")
+local tts_skip_button = CreateFrame("Button", "MorkaTalk_TTS_SkipButton", UIParent, "UIPanelButtonTemplate")
 tts_skip_button:SetSize(80, 22)
 tts_skip_button:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
 tts_skip_button:SetText("Skip")
@@ -452,16 +201,9 @@ tts_skip_button:SetScript("OnEnter",
     end)
 tts_skip_button:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- Expose functions for other modules / testing
-ns.SkipLine = SkipLine
-ns.StopSpeaking = StopSpeaking
-ns.ReadHoveredButton = ReadHoveredButton
-ns.ReadAndSpeakGameTooltip = ReadAndSpeakGameTooltip
-ns.Read = Read
-
 -- Slash command to toggle TTS debug logging
-SLASH_MORKAUI_TTSDEBUG1 = "/morkattsdebug"
-SlashCmdList["MORKAUI_TTSDEBUG"] = function(msg)
+SLASH_MorkaTalk_TTSDEBUG1 = "/morkattsdebug"
+SlashCmdList["MorkaTalk_TTSDEBUG"] = function(msg)
     ns.TTS_DEBUG = not ns.TTS_DEBUG
-    print("MorkaUI TTS debug:", ns.TTS_DEBUG and "ON" or "OFF")
+    print("MorkaTalk TTS debug:", ns.TTS_DEBUG and "ON" or "OFF")
 end

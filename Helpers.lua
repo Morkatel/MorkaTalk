@@ -278,7 +278,7 @@ ns.TTSLog = function(...)
     local n = select('#', ...)
     local parts = {}
     for i = 1, n do parts[i] = tostring(select(i, ...)) end
-    print("MorkaUI TTS:", table.concat(parts, " "))
+    print("MorkaTalk TTS:", table.concat(parts, " "))
 end
 
 -- Expose helper functions for Core.lua

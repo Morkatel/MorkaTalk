@@ -1,0 +1,25 @@
+## Interface: 120001
+## Title: MorkaTalk
+## Notes: Accessibility addon that reads any on-screen text aloud using in-game TTS
+## Author: Morkatel
+## Version: 0.1
+## SavedVariables: MorkaTalkDB
+# Libraries
+libs/Ace3/AceAddon-3.0/AceAddon-3.0.lua
+libs/Ace3/AceDB-3.0/AceDB-3.0.lua
+libs/LibDBIcon-1.0/embeds.xml
+
+# Main Files
+Settings.lua
+
+# GUI Element Handlers
+element_handlers/AuctionHouse.lua
+element_handlers/ErrorPopup.lua
+element_handlers/MailBox.lua
+element_handlers/NpcChat.lua
+element_handlers/QuestFrame.lua
+
+# Core Functionality
+Helpers.lua
+Reader.lua
+Core.lua
