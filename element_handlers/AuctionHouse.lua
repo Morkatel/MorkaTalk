@@ -4,7 +4,37 @@ ns.LAST_HOVERED_AH_ITEM_BUY = nil
 ns.LAST_HOVERED_AH_ITEM_SELL = nil
 ns.LAST_HOVERED_AH_ITEM_OWN = nil
 
-ns.OnBrowserRowAcquired = function(_, frame, _, _)
+
+-- Format auction buy info
+local function FormatAuctionBuyInfo(item)
+    return item.itemName .. ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', Quantity: ' .. item.totalQuantity
+end
+
+-- Format auction sell info
+local function FormatAuctionSellInfo(item)
+    return 'Price: ' ..
+        ns.GetFormattedPrice(item.price) ..
+        ', Quantity: ' .. item.totalQuantity .. ' from ' .. item.sellers .. ' sellers'
+end
+
+-- Format auction own info
+local function FormatAuctionOwnInfo(item)
+    return item.itemName ..
+        ', Price: ' .. ns.GetFormattedPrice(item.price) .. ', ' .. SecondsToTime(item.timeLeft) .. ' remaining'
+end
+
+-- Gather auction parts for reading
+function ns.GatherAuctionParts(parts)
+    if ns.LAST_HOVERED_AH_ITEM_BUY then
+        table.insert(parts, FormatAuctionBuyInfo(ns.LAST_HOVERED_AH_ITEM_BUY))
+    elseif ns.LAST_HOVERED_AH_ITEM_SELL then
+        table.insert(parts, FormatAuctionSellInfo(ns.LAST_HOVERED_AH_ITEM_SELL))
+    elseif ns.LAST_HOVERED_AH_ITEM_OWN then
+        table.insert(parts, FormatAuctionOwnInfo(ns.LAST_HOVERED_AH_ITEM_OWN))
+    end
+end
+
+function ns.OnBrowserRowAcquired(_, frame, _, _)
     -- Ensure we only hook once per frame instance
     if not frame.MyOnEnterHooked then
         frame:HookScript("OnEnter", function(row)
@@ -29,7 +59,7 @@ ns.OnBrowserRowAcquired = function(_, frame, _, _)
     end
 end
 
-ns.OnSellListRowAcquired = function(_, frame, _, _)
+function ns.OnSellListRowAcquired(_, frame, _, _)
     -- Ensure we only hook once per frame instance
     if frame and not frame.MyOnEnterHooked then
         frame:HookScript("OnEnter", function(row)
@@ -50,7 +80,7 @@ ns.OnSellListRowAcquired = function(_, frame, _, _)
     end
 end
 
-ns.OnAllAuctionsRowAcquired = function(_, frame, _, _)
+function ns.OnAllAuctionsRowAcquired(_, frame, _, _)
     -- Ensure we only hook once per frame instance
     if not frame.MyOnEnterHooked then
         frame:HookScript("OnEnter", function(row)
@@ -74,7 +104,6 @@ ns.OnAllAuctionsRowAcquired = function(_, frame, _, _)
         frame.MyOnEnterHooked = true
     end
 end
-
 
 local f = CreateFrame("Frame")
 

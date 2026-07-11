@@ -13,6 +13,10 @@ frame:SetScript("OnEvent", function(self, event, errorType, message)
         return
     end
 
+    if true then
+        return
+    end
+
     if issecretvalue(message) then
         ns.is_speaking = true
         ns.ReadText("Error: ")

@@ -1,5 +1,7 @@
 local addon, ns = ...
 
+local TryGetTextFromFrame
+
 -- Helper: attempt to extract readable text from a frame (heuristics)
 -- Moved here from Core.lua for reuse and clarity
 ---@param frame Frame
@@ -68,7 +70,7 @@ local function TryGetTextFromNamedGlobals(frame)
 end
 
 ---@param frame Frame
-local function TryGetTextFromChildren(frame)
+local function TryGetTextFromAllChildren(frame)
     if not frame then return nil end
     if frame.GetChildren then
         local i = 1
@@ -83,90 +85,6 @@ local function TryGetTextFromChildren(frame)
         end
     end
     return nil
-end
-
----@param frame Frame
-local function TryGetTextFromRegions(frame)
-    if not frame then return nil end
-    if frame.GetRegions then
-        local regs = { frame:GetRegions() }
-        for _, r in ipairs(regs) do
-            if r and r.GetText then
-                local t = r:GetText()
-                if not issecretvalue(t) and t and t ~= "" then return t end
-            end
-        end
-    end
-    return nil
-end
-
----@param frame Frame
-local function TryGetTextFromFrame(frame)
-    local text = TryGetTextFromDirect(frame)
-    if text then return text end
-
-    text = TryGetTextFromFields(frame)
-    if text then return text end
-
-    text = TryGetTextFromScrollChild(frame)
-    if text then return text end
-
-    text = TryGetTextFromNamedGlobals(frame)
-    if text then return text end
-
-    text = TryGetTextFromChildren(frame)
-    if text then return text end
-
-    text = TryGetTextFromRegions(frame)
-    if text then return text end
-
-    return nil
-end
-
--- Extract text from the current line
-local function ExtractTextFromLine(tts_lines, tts_idx)
-    local text = table.remove(tts_lines, 1)
-    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
-    local text_len = issecretvalue(text) and 1 or #text
-    if not text or text_len == 0 then
-        tts_idx = tts_idx + 1
-        C_Timer.After(0.01, ns.SpeakCurrentLine)
-        return nil, 0, tts_idx
-    end
-    return text, text_len, tts_idx
-end
-
--- Read the extracted text aloud
-local function ReadTextAloud(text, ns)
-    ns.is_speaking = true
-    ns.ReadText(text)
-end
-
--- Calculate the estimated speech duration
-local function CalculateSpeechDuration(text, ns)
-    if not text then return 1 end
-    if issecretvalue(text) == false then
-        return ns.EstimateSpeechDuration(text)
-    else
-        print("SECRET SKIPPED")
-        return 0
-    end
-end
-
--- Schedule the next line based on estimated time
-local function ScheduleNextTimer(est, tts_timer, tts_idx, ns)
-    if not C_Timer then return tts_timer, tts_idx end
-    if not est or est <= 0 then
-        ns.is_speaking = false
-        return tts_timer, tts_idx
-    end
-    ns.SafeCancelTimer(tts_timer)
-    tts_timer = nil
-    tts_timer = C_Timer.NewTimer(est + 0.2, function()
-        tts_idx = tts_idx + 1
-        ns.SpeakCurrentLine()
-    end)
-    return tts_timer, tts_idx
 end
 
 -- Helper: attempt to extract readable text from children of a frame
@@ -184,6 +102,43 @@ local function TryGetTextFromChildren(frame)
         parent = parent.GetParent and parent:GetParent()
         depth = depth + 1
     end
+
+    return nil
+end
+---@param frame Frame
+local function TryGetTextFromRegions(frame)
+    if not frame then return nil end
+    if frame.GetRegions then
+        local regs = { frame:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.GetText then
+                local t = r:GetText()
+                if not issecretvalue(t) and t and t ~= "" then return t end
+            end
+        end
+    end
+    return nil
+end
+
+---@param frame Frame
+TryGetTextFromFrame = function(frame)
+    local text = TryGetTextFromDirect(frame)
+    if text then return text end
+
+    text = TryGetTextFromFields(frame)
+    if text then return text end
+
+    text = TryGetTextFromScrollChild(frame)
+    if text then return text end
+
+    text = TryGetTextFromNamedGlobals(frame)
+    if text then return text end
+
+    text = TryGetTextFromChildren(frame)
+    if text then return text end
+
+    text = TryGetTextFromRegions(frame)
+    if text then return text end
 
     return nil
 end
@@ -249,13 +204,13 @@ ns.GetReadableTextFromFrame = GetReadableTextFromFrame
 local function ExtractFrameText(frame)
     if not frame then return nil end
     local frameName = frame:GetName() or "unnamed"
-    TTSLog("Hover gather: found frame", frameName, "ref:", frame)
+    ns.TTSLog("Hover gather: found frame", frameName, "ref:", frame)
 
     local actionName = (ns.GetActionButtonName and ns.GetActionButtonName(frame)) or nil
     local text = actionName or ((ns.GetReadableTextFromFrame and ns.GetReadableTextFromFrame(frame)) or nil)
 
     if not text or text == "" then
-        TTSLog("Hover gather: no readable text on hovered frame")
+        ns.TTSLog("Hover gather: no readable text on hovered frame")
         return nil
     end
 
@@ -266,11 +221,47 @@ local function ExtractFrameText(frame)
         end
     end
 
-    TTSLog("Hover gather: frame", frameName, "text:", text)
+    ns.TTSLog("Hover gather: frame", frameName, "text:", text)
     return text
 end
 
-ns.ExtractFrameText = ExtractFrameText
+-- Get the frame currently under the mouse
+local function GetHoveredFrame()
+    ns.TTSLog("Hover gather started")
+    local focus = nil
+    local gm_foci = rawget(_G, "GetMouseFoci")
+    if gm_foci then
+        local a, b, c, d = gm_foci()
+        if type(a) == "table" then
+            for i = 1, #a do
+                if a[i] then
+                    focus = a[i]
+                    break
+                end
+            end
+        else
+            focus = a or b or c or d
+        end
+    end
+    return focus
+end
+
+-- Extract the frame currently under the mouse
+local function ExtractHoveredFrame()
+    local focus = GetHoveredFrame()
+    if not focus then
+        ns.TTSLog("Hover gather: no frame under mouse")
+        return nil
+    end
+    return focus
+end
+
+-- Read out hovered control (gather-only). Returns gathered text string or nil.
+local function ReadHoveredButton()
+    local frame = ExtractHoveredFrame()
+    if not frame then return nil end
+    return ns.ExtractFrameText(frame)
+end
 
 -- Central TTS helpers
 ns.TTSLog = function(...)
@@ -280,12 +271,6 @@ ns.TTSLog = function(...)
     for i = 1, n do parts[i] = tostring(select(i, ...)) end
     print("MorkaTalk TTS:", table.concat(parts, " "))
 end
-
--- Expose helper functions for Core.lua
-ns.ExtractTextFromLine = ExtractTextFromLine
-ns.ReadTextAloud = ReadTextAloud
-ns.CalculateSpeechDuration = CalculateSpeechDuration
-ns.ScheduleNextTimer = ScheduleNextTimer
 
 ns.GetTTSSettings = function()
     local volume, rate, voiceID = 100, 0, 0
@@ -317,7 +302,7 @@ ns.SafeCancelTimer = function(timer)
 end
 
 -- Return a readable name for an action bar button frame, if applicable
-ns.GetActionButtonName = function(frame)
+function GetActionButtonName(frame)
     if not frame then return nil end
     -- Try attribute "action" first
     local action = nil
@@ -396,18 +381,18 @@ end
 ns.ReadFrameStackAndFindText = function()
     local frames = ns.GetFrameStack()
     if #frames == 0 then
-        TTSLog("No frames in stack")
+        ns.TTSLog("No frames in stack")
         return nil
     end
 
-    TTSLog("Frame stack has", #frames, "frames")
+    ns.TTSLog("Frame stack has", #frames, "frames")
 
     -- Try each frame from top to bottom
     for i, frame in ipairs(frames) do
         local frameName = frame:GetName() or "unnamed"
         local text = ns.GetReadableTextFromFrame(frame)
 
-        TTSLog("Frame", i, ":", frameName, "- text:", text or "(none)")
+        ns.TTSLog("Frame", i, ":", frameName, "- text:", text or "(none)")
 
         if text and text ~= "" then
             return text, frame, i
@@ -507,64 +492,6 @@ ns.GetTextUnderMouse = function()
     return singleString
 end
 
--- Helper function to format standard gold/silver/copper prices
-local function FormatStandardPrice(price)
-    local gold = math.floor(price / 10000)
-    local silver = math.floor((price % 10000) / 100)
-    local copper = price % 100
-
-    local parts = {}
-    if gold > 0 then table.insert(parts, gold .. " Gold") end
-    if silver > 0 then table.insert(parts, silver .. " Silver") end
-    if copper > 0 then table.insert(parts, copper .. " Copper") end
-
-    return table.concat(parts, ", ")
-end
-
--- Helper function to format alternative currency prices
-local function FormatAlternativePrice(frameID, costCount)
-    local costParts = {}
-    for i = 1, costCount do
-        local _, amount, link, currencyName = GetMerchantItemCostItem(frameID, i)
-
-        if link then
-            local itemName = link:match("%[(.*)%]") or "Unknown Item"
-            table.insert(costParts, amount .. " " .. itemName)
-        elseif currencyName then
-            table.insert(costParts, amount .. " " .. currencyName)
-        end
-    end
-
-    if #costParts > 0 then
-        return table.concat(costParts, ", ")
-    end
-    return ""
-end
-
-ns.GetMerchantPriceText = function(frame)
-    if not (MerchantFrame and MerchantFrame:IsShown()) then return "" end
-
-    for _, f in ipairs(GetMouseFoci()) do
-        if f == MerchantFrame or RegionUtil.IsDescendantOf(f, MerchantFrame) then
-            local id = f:GetID()
-            if not id or id == 0 then return nil end
-
-            local inf = C_MerchantFrame.GetItemInfo(id)
-            if not inf then return "" end
-
-            if inf.price > 0 then
-                return FormatStandardPrice(inf.price)
-            end
-
-            if inf.hasExtendedCost then
-                return FormatAlternativePrice(id, GetMerchantItemCostInfo(id))
-            end
-        end
-    end
-
-    return ""
-end
-
 local function GetHoveredAHListing()
     -- Get the frame currently under the mouse cursor
     -- local regions = GetMouseFoci()
@@ -611,46 +538,6 @@ local function ExtractItemName(rowData)
     end
 
     return itemName
-end
-
--- Format auction info for output
-local function FormatAuctionInfo(itemName, price)
-    local priceString = ns.GetFormattedPrice(price)
-    return string.format("%s. Price: %s", itemName, priceString)
-end
-
-ns.GetAuctionInfoUnderMouse = function()
-    GetHoveredAHListing()
-
-    -- GetMouseFoci returns multiple values, not a table
-    local focus = select(1, GetMouseFoci())
-    if not focus then return "" end
-
-    -- Traverse up to find the row frame (which holds the data)
-    local rowData = nil
-    local current = focus
-
-    while current do
-        if current.GetElementData then
-            rowData = current:GetElementData()
-            -- Verify this is actual AH data (look for common keys)
-            if rowData and type(rowData) == "table" and (rowData.itemKey or rowData.minPrice or rowData.unitPrice) then
-                break
-            end
-        end
-        if current.GetParent then
-            current = current:GetParent()
-        else
-            return ""
-        end
-    end
-
-    if not rowData then return "" end
-
-    -- Extract and format auction info
-    local price = ExtractAuctionPrice(rowData)
-    local itemName = ExtractItemName(rowData)
-    return FormatAuctionInfo(itemName, price)
 end
 
 -- Helper for Price Formatting

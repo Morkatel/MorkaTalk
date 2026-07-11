@@ -10,9 +10,13 @@ libs/Ace3/AceDB-3.0/AceDB-3.0.lua
 libs/LibDBIcon-1.0/embeds.xml
 
 # Main Files
+Helpers.lua
 Settings.lua
+Reader.lua
 
 # GUI Element Handlers
+element_handlers/Merchant.lua
+element_handlers/Tooltip.lua
 element_handlers/AuctionHouse.lua
 element_handlers/ErrorPopup.lua
 element_handlers/MailBox.lua
@@ -20,6 +24,4 @@ element_handlers/NpcChat.lua
 element_handlers/QuestFrame.lua
 
 # Core Functionality
-Helpers.lua
-Reader.lua
 Core.lua

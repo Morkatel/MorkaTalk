@@ -11,9 +11,60 @@ local tts_skip_button = nil -- UI button for skipping lines
 -- Centralized debug logger: use helper implementation from Helpers.lua
 local TTSLog = ns.TTSLog
 
+local ValidateQueue, ExtractCurrentLineText, ReadTextAloud, EstimateLineDuration, ScheduleNextTimerForLine
+
+-- Speak the current queued line (internal)
+local function SpeakCurrentLine()
+    if not ValidateQueue() then
+        -- No more lines to speak
+        return
+    end
+
+    local text, text_len = ExtractCurrentLineText()
+
+    -- if the text is nil or empty, skip to the next line
+    if not text or text_len == 0 then
+        tts_idx = tts_idx + 1
+        C_Timer.After(0.01, SpeakCurrentLine)
+        return
+    end
+
+    ReadTextAloud(text)
+    local est = EstimateLineDuration(text)
+    ScheduleNextTimerForLine(est, text_len)
+end
+
+-- Calculate the estimated speech duration
+local function EstimateSpeechDuration(text)
+    if not text then return 1 end
+    if issecretvalue(text) == false then
+        return ns.EstimateSpeechDuration(text)
+    else
+        -- Secret value will not be rea
+        print("SECRET SKIPPED")
+        return 0
+    end
+end
+
+-- Schedule the next line based on estimated time
+local function ScheduleNextTimer(duration_estimate, tts_timer, tts_idx)
+    if not C_Timer then return tts_timer, tts_idx end
+    if not duration_estimate or duration_estimate <= 0 then
+        ns.is_speaking = false
+        return tts_timer, tts_idx
+    end
+    ns.SafeCancelTimer(tts_timer)
+    tts_timer = nil
+    tts_timer = C_Timer.NewTimer(duration_estimate + 0.2, function()
+        tts_idx = tts_idx + 1
+        SpeakCurrentLine()
+    end)
+    return tts_timer, tts_idx
+end
+
 -- Stop the currently ongoing speech only (keeps the queue intact)
 local function StopCurrentSpeech()
-    TTSLog("Stopping current speech (queue preserved)")
+    ns.TTSLog("Stopping current speech (queue preserved)")
     ns.is_speaking = false
     if tts_timer and tts_timer.Cancel then
         tts_timer:Cancel()
@@ -23,27 +74,27 @@ local function StopCurrentSpeech()
     if C_VoiceChat then
         if C_VoiceChat.StopSpeakingText then
             C_VoiceChat.StopSpeakingText()
-            TTSLog("Called C_VoiceChat.StopSpeakingText")
+            ns.TTSLog("Called C_VoiceChat.StopSpeakingText")
         end
     end
 end
 
-ns.ReadText = function(text)
+function ns.ReadText(text)
     local voiceID, rate, volume = ns.GetTTSSettings()
     local text_len = issecretvalue(text) and 1 or #text
 
-    TTSLog("Speak line", tts_idx, "of", #tts_lines, "len:", text_len)
+    ns.TTSLog("Speak line", tts_idx, "of", #tts_lines, "len:", text_len)
     if C_VoiceChat and C_VoiceChat.SpeakText then
         C_VoiceChat.SpeakText(voiceID, text, rate, volume, false)
     else
-        TTSLog("C_VoiceChat.SpeakText not available")
+        ns.TTSLog("C_VoiceChat.SpeakText not available")
     end
 end
 
 -- Validate if there are lines to speak
-local function ValidateQueue()
+ValidateQueue = function()
     if not tts_lines or tts_idx == 0 or tts_idx > #tts_lines then
-        TTSLog("No more lines to speak")
+        ns.TTSLog("No more lines to speak")
         tts_lines = {}
         tts_idx = 0
         if tts_skip_button then
@@ -55,41 +106,35 @@ local function ValidateQueue()
     return true
 end
 
-
+-- Extract text from the current line
+ExtractTextFromLine = function()
+    local text = table.remove(tts_lines, 1)
+    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
+    local text_len = issecretvalue(text) and 1 or #text
+    return text, text_len
+end
 
 -- Extract the current line text
-local function ExtractCurrentLineText()
-    local text, text_len, new_tts_idx = ns.ExtractTextFromLine(tts_lines, tts_idx)
+ExtractCurrentLineText = function()
+    local text, text_len = ExtractTextFromLine()
     if not text then return nil, 0 end
-    return text, text_len, new_tts_idx
+    return text, text_len
 end
 
 -- Read the extracted line aloud
-local function ReadCurrentLineAloud(text)
-    ns.ReadTextAloud(text, ns)
+ReadTextAloud = function(text)
+    ns.is_speaking = true
+    ns.ReadText(text)
 end
 
 -- Calculate the duration for the current line
-local function CalculateLineDuration(text)
-    return ns.CalculateSpeechDuration(text, ns)
+EstimateLineDuration = function(text)
+    return EstimateSpeechDuration(text)
 end
 
 -- Schedule the next line based on estimated time
-local function ScheduleNextTimerForLine(est, text_len)
-    tts_timer, tts_idx = ns.ScheduleNextTimer(est, tts_timer, tts_idx, ns)
-end
-
--- Speak the current queued line (internal)
-ns.SpeakCurrentLine = function()
-    if not ValidateQueue() then
-        return
-    end
-
-    local text, text_len, new_tts_idx = ExtractCurrentLineText()
-    if not text then return end
-    ReadCurrentLineAloud(text)
-    local est = CalculateLineDuration(text)
-    ScheduleNextTimerForLine(est, text_len)
+ScheduleNextTimerForLine = function(est, text_len)
+    tts_timer, tts_idx = ScheduleNextTimer(est, tts_timer, tts_idx)
 end
 
 -- Skip current line and move to next
@@ -102,7 +147,7 @@ ns.SkipLine = function()
     -- move to next line and continue
     tts_idx = tts_idx + 1
     if tts_idx <= #tts_lines then
-        ns.SpeakCurrentLine()
+        SpeakCurrentLine()
     else
         -- finished
         tts_lines = {}
@@ -131,29 +176,13 @@ ns.StopSpeaking = function()
         tts_skip_button:Hide()
     end
 
-    -- try common C_VoiceChat stop/cancel APIs safely
     if C_VoiceChat then
         if C_VoiceChat.StopSpeakingText then
             C_VoiceChat.StopSpeakingText()
-            TTSLog("Called C_VoiceChat.StopSpeakingText")
-        end
-        if C_VoiceChat.CancelSpeakText then
-            C_VoiceChat.CancelSpeakText()
-            TTSLog("Called C_VoiceChat.CancelSpeakText")
-        end
-        if C_VoiceChat.CancelSpeaking then
-            C_VoiceChat.CancelSpeaking()
-            TTSLog("Called C_VoiceChat.CancelSpeaking")
+            ns.TTSLog("Called C_VoiceChat.StopSpeakingText")
         end
     else
-        TTSLog("C_VoiceChat not available")
-    end
-end
-
--- Handle table input for TTS
-local function HandleTableInput(items)
-    for _, value in ipairs(items) do
-        table.insert(tts_lines, value)
+        ns.TTSLog("C_VoiceChat not available")
     end
 end
 
@@ -161,15 +190,10 @@ end
 -- Validate input for reading
 local function ValidateInput()
     if not tts_lines or #tts_lines == 0 then
-        TTSLog("Read: no parts to speak")
+        ns.TTSLog("Read: no parts to speak")
         return false
     end
     return true
-end
-
--- Handle string input for TTS
-local function HandleStringInput(text)
-    table.insert(tts_lines, text)
 end
 
 
@@ -181,7 +205,7 @@ local function ProcessSecretValues()
             result = string.concat(result, tts_lines[i], " ")
         end
         tts_lines = {}
-        TTSLog("Read concatenated secret text")
+        ns.TTSLog("Read concatenated secret text")
         ns.ReadText(result)
         return true
     end
@@ -194,14 +218,28 @@ local function QueueLinesForReading()
     if tts_skip_button then
         tts_skip_button:Show()
     end
-    ns.SpeakCurrentLine()
+    SpeakCurrentLine()
+end
+
+-- Handle table input for TTS
+local function HandleTableInput(items)
+    for _, value in ipairs(items) do
+        table.insert(tts_lines, value)
+    end
+end
+
+-- Handle string input for TTS
+local function HandleStringInput(text)
+    table.insert(tts_lines, text)
 end
 
 -- Handle input for reading
 local function HandleInput(items)
     if type(items) == "string" then
+        ns.TTSLog("Read: received string input")
         HandleStringInput(items)
     elseif type(items) == "table" then
+        ns.TTSLog("Read: received table input with", #items, "items")
         HandleTableInput(items)
     else
         return false
@@ -210,26 +248,29 @@ local function HandleInput(items)
 end
 
 -- Read function: accepts a string or a table of strings and starts queued TTS for them
-local function Read(items)
+ns.Read = function(items)
     if not HandleInput(items) then
         return false
     end
+
     if not ValidateInput() then
         return false
     end
+
     if ProcessSecretValues() then
         return true
     end
+
     QueueLinesForReading()
+
     return true
 end
-
 
 -- Process gathered parts for reading
 ns.ProcessPartsForReading = function(parts)
     if #parts > 0 then
-        Read(parts)
+        ns.Read(parts)
     else
-        TTSLog("OnEvent CTRL: nothing to read")
+        ns.TTSLog("OnEvent CTRL: nothing to read")
     end
 end

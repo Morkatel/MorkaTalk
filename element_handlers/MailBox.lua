@@ -1,9 +1,5 @@
 local addon, ns = ...
 
-ns.LAST_HOVERED_AH_ITEM_BUY = nil
-ns.LAST_HOVERED_AH_ITEM_SELL = nil
-ns.LAST_HOVERED_AH_ITEM_OWN = nil
-
 local function OnInboxUpdate()
     DevTools_Dump(MailFrame)
     -- Loop through the visible buttons in the list
