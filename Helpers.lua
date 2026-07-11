@@ -222,7 +222,6 @@ function ns.GetTextFromFrames(frames)
     local seenText = {} -- The lookup set (hash map)
 
     for _, frame in ipairs(frames) do
-        print("GetTextFromFrames: examining frame", frame:GetName() or "unnamed", "ref:", frame)
         -- 1. Check if the frame itself has text (e.g., EditBoxes)
         ExtractTextFromObject(frame, foundText, seenText)
 
