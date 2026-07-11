@@ -10,6 +10,7 @@ libs/Ace3/AceDB-3.0/AceDB-3.0.lua
 libs/LibDBIcon-1.0/embeds.xml
 
 # Main Files
+Experiments.lua
 Helpers.lua
 Settings.lua
 Reader.lua

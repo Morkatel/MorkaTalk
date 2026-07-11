@@ -4,7 +4,6 @@ ns.is_speaking = false
 
 -- TTS queue and control variables
 local tts_lines = {}        -- list of lines to speak
-local tts_idx = 0           -- current line index in tts_lines (1-based)
 local tts_timer = nil       -- timer object for the current line
 local tts_skip_button = nil -- UI button for skipping lines
 
@@ -24,7 +23,7 @@ local function SpeakCurrentLine()
 
     -- if the text is nil or empty, skip to the next line
     if not text or text_len == 0 then
-        tts_idx = tts_idx + 1
+        ns.TTSLog("Skipping empty line")
         C_Timer.After(0.01, SpeakCurrentLine)
         return
     end
@@ -40,26 +39,26 @@ local function EstimateSpeechDuration(text)
     if issecretvalue(text) == false then
         return ns.EstimateSpeechDuration(text)
     else
-        -- Secret value will not be rea
-        print("SECRET SKIPPED")
+        -- Secret value will not be read
+        ns.TTSLog("SECRET SKIPPED")
         return 0
     end
 end
 
 -- Schedule the next line based on estimated time
-local function ScheduleNextTimer(duration_estimate, tts_timer, tts_idx)
-    if not C_Timer then return tts_timer, tts_idx end
+local function ScheduleNextTimer(duration_estimate, tts_timer)
+    ns.TTSLog("Scheduling next line timer with estimated duration:", duration_estimate)
+    if not C_Timer then return tts_timer end
     if not duration_estimate or duration_estimate <= 0 then
         ns.is_speaking = false
-        return tts_timer, tts_idx
+        return tts_timer
     end
     ns.SafeCancelTimer(tts_timer)
     tts_timer = nil
     tts_timer = C_Timer.NewTimer(duration_estimate + 0.2, function()
-        tts_idx = tts_idx + 1
         SpeakCurrentLine()
     end)
-    return tts_timer, tts_idx
+    return tts_timer
 end
 
 -- Stop the currently ongoing speech only (keeps the queue intact)
@@ -83,7 +82,7 @@ function ns.ReadText(text)
     local voiceID, rate, volume = ns.GetTTSSettings()
     local text_len = issecretvalue(text) and 1 or #text
 
-    ns.TTSLog("Speak line", tts_idx, "of", #tts_lines, "len:", text_len)
+    ns.TTSLog("Speak line of", #tts_lines, "len:", text_len)
     if C_VoiceChat and C_VoiceChat.SpeakText then
         C_VoiceChat.SpeakText(voiceID, text, rate, volume, false)
     else
@@ -93,10 +92,9 @@ end
 
 -- Validate if there are lines to speak
 ValidateQueue = function()
-    if not tts_lines or tts_idx == 0 or tts_idx > #tts_lines then
+    if not tts_lines then
         ns.TTSLog("No more lines to speak")
         tts_lines = {}
-        tts_idx = 0
         if tts_skip_button then
             tts_skip_button:Hide()
         end
@@ -109,7 +107,11 @@ end
 -- Extract text from the current line
 ExtractTextFromLine = function()
     local text = table.remove(tts_lines, 1)
-    tts_idx = tts_idx - 1 -- adjust index since we removed the line from the queue
+    if not text then
+        ns.TTSLog("Empty line extracted")
+        return nil, 0
+    end
+
     local text_len = issecretvalue(text) and 1 or #text
     return text, text_len
 end
@@ -134,24 +136,22 @@ end
 
 -- Schedule the next line based on estimated time
 ScheduleNextTimerForLine = function(est, text_len)
-    tts_timer, tts_idx = ScheduleNextTimer(est, tts_timer, tts_idx)
+    tts_timer = ScheduleNextTimer(est, tts_timer)
 end
 
 -- Skip current line and move to next
 ns.SkipLine = function()
-    if not tts_lines or tts_idx == 0 then return end
-    TTSLog("Skipping line", tts_idx)
+    if not tts_lines then return end
+    TTSLog("Skipping line")
     -- stop current speech (preserve queue)
     StopCurrentSpeech()
 
     -- move to next line and continue
-    tts_idx = tts_idx + 1
-    if tts_idx <= #tts_lines then
+    if 1 <= #tts_lines then
         SpeakCurrentLine()
     else
         -- finished
         tts_lines = {}
-        tts_idx = 0
         if tts_skip_button then
             tts_skip_button:Hide()
         end
@@ -164,7 +164,6 @@ ns.StopSpeaking = function()
     -- clear speaking state and queued lines
     ns.is_speaking = false
     tts_lines = {}
-    tts_idx = 0
 
     -- cancel any running timer
     if tts_timer and tts_timer.Cancel then
@@ -214,7 +213,6 @@ end
 
 -- Queue lines for sequential reading
 local function QueueLinesForReading()
-    tts_idx = 1
     if tts_skip_button then
         tts_skip_button:Show()
     end
