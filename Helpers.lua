@@ -216,12 +216,13 @@ local function ExtractTextFromChildren(frame, foundText, seenText)
     end
 end
 
-function ns.GetTextUnderMouse()
-    local frames = GetMouseFoci()
+-- @return string: concatenated text from all frames
+function ns.GetTextFromFrames(frames)
     local foundText = {}
     local seenText = {} -- The lookup set (hash map)
 
     for _, frame in ipairs(frames) do
+        print("GetTextFromFrames: examining frame", frame:GetName() or "unnamed", "ref:", frame)
         -- 1. Check if the frame itself has text (e.g., EditBoxes)
         ExtractTextFromObject(frame, foundText, seenText)
 
@@ -234,7 +235,18 @@ function ns.GetTextUnderMouse()
 
     -- Syntax: table.concat(table, separator)
     local singleString = table.concat(foundText, " ")
+    if singleString == "" then
+        ns.TTSLog("GetTextFromFrames: no readable text found in frames")
+        return nil
+    end
+
+    ns.TTSLog("GetTextFromFrames: found text:", singleString)
     return singleString
+end
+
+function ns.GetTextUnderMouse()
+    local frames = GetMouseFoci()
+    return ns.GetTextFromFrames(frames)
 end
 
 -- Helper for Price Formatting

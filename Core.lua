@@ -1,6 +1,6 @@
 local addon, ns = ...
 
-ns.TTS_DEBUG = true -- set to true to enable verbose TTS debug logging
+ns.TTS_DEBUG = false -- set to true to enable verbose TTS debug logging
 
 -- Flags for presence of certain UI APIs
 
@@ -13,14 +13,21 @@ local function GatherDefaultParts(parts)
     local questTextParts = ns.GetQuestText()
     local hoverText = ns.GetTextUnderMouse()
     local tooltipParts = ns.GatherTooltipLines()
+    local mapText = ns.GetTextFromFrames({ WorldMapFrame.ScrollContainer })
 
     if priceText then table.insert(parts, priceText) end
     if tooltipParts then
+        ns.TTSLog("TooltipAvailable")
         for i = 1, #tooltipParts do table.insert(parts, tooltipParts[i]) end
     elseif hoverText then
+        ns.TTSLog("HoverAvailable " .. hoverText)
         table.insert(parts, hoverText)
     elseif ns.IsQuestAvailable() then
+        ns.TTSLog("QuestAvailable")
         for i = 1, #questTextParts do table.insert(parts, questTextParts[i]) end
+    elseif mapText then
+        ns.TTSLog("MapAvailable")
+        table.insert(parts, mapText)
     end
 end
 
