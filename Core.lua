@@ -59,9 +59,9 @@ local actionHandlers = {
 }
 
 
-local tooltipKeyListener = CreateFrame("Frame", "BSTooltipKeyListener")
-tooltipKeyListener:RegisterEvent("MODIFIER_STATE_CHANGED")
-tooltipKeyListener:SetScript("OnEvent", function(self, event, key, down)
+local tooltip_key_listener = CreateFrame("Frame", "BSTooltipKeyListener")
+tooltip_key_listener:RegisterEvent("MODIFIER_STATE_CHANGED")
+tooltip_key_listener:SetScript("OnEvent", function(self, event, key, down)
     if not key or down ~= 1 then return end
     ns.TTSLog(event .. " " .. key .. " " .. down)
     for action, boundKey in pairs(MorkaTalkDB.keys) do

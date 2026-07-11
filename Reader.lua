@@ -10,10 +10,17 @@ local tts_skip_button = nil -- UI button for skipping lines
 -- Centralized debug logger: use helper implementation from Helpers.lua
 local TTSLog = ns.TTSLog
 
-local ValidateQueue, ExtractCurrentLineText, ReadTextAloud, EstimateLineDuration, ScheduleNextTimerForLine
+local ValidateQueue, ExtractCurrentLineText, ReadTextAloud, EstimateLineDuration, ScheduleNextTimerForLine, SpeakCurrentLine
+
+local tts_event_listener = CreateFrame("Frame", "MorkaTalkTTSListener")
+tts_event_listener:RegisterEvent("VOICE_CHAT_TTS_PLAYBACK_FINISHED")
+tts_event_listener:SetScript("OnEvent", function(self, event, key, down)
+    ns.TTSLog("TTS Done, go next")
+    SpeakCurrentLine()
+end)
 
 -- Speak the current queued line (internal)
-local function SpeakCurrentLine()
+SpeakCurrentLine = function()
     if not ValidateQueue() then
         -- No more lines to speak
         return
@@ -24,13 +31,13 @@ local function SpeakCurrentLine()
     -- if the text is nil or empty, skip to the next line
     if not text or text_len == 0 then
         ns.TTSLog("Skipping empty line")
-        C_Timer.After(0.01, SpeakCurrentLine)
+        C_Timer.After(0, SpeakCurrentLine)
         return
     end
 
     ReadTextAloud(text)
-    local est = EstimateLineDuration(text)
-    ScheduleNextTimerForLine(est, text_len)
+    --local est = EstimateLineDuration(text)
+    --ScheduleNextTimerForLine(est, text_len)
 end
 
 -- Calculate the estimated speech duration
@@ -92,7 +99,7 @@ end
 
 -- Validate if there are lines to speak
 ValidateQueue = function()
-    if not tts_lines then
+    if not tts_lines or #tts_lines == 0 then
         ns.TTSLog("No more lines to speak")
         tts_lines = {}
         if tts_skip_button then
@@ -101,6 +108,8 @@ ValidateQueue = function()
         ns.is_speaking = false
         return false
     end
+
+    ns.TTSLog("Lines remaining to speak:", #tts_lines)
     return true
 end
 
